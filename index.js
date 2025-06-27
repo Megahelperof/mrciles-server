@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
+const fetch = require('node-fetch');
 
 // 1. Environment Validation
 console.log('Starting bot...');
@@ -53,7 +54,12 @@ const commands = [
     name: 'add',
     description: 'Add a new product',
     options: [
-      { name: 'image', description: 'Imgur URL', type: 3, required: true },
+      { 
+        name: 'attachment', 
+        description: 'Image attachment', 
+        type: 11, // Attachment type
+        required: true 
+      },
       { name: 'name', description: 'Product name', type: 3, required: true },
       { name: 'price', description: 'Product price ($XX.XX)', type: 3, required: true },
       { name: 'link', description: 'Product link', type: 3, required: true }
@@ -78,21 +84,38 @@ const commands = [
 const rest = new REST({ version: '9' }).setToken(process.env.DISCORD_BOT_TOKEN);
 
 // 3. Firestore Database Operations
-async function addProduct(image, name, price, link) {
+async function addProduct(attachment, name, price, link) {
   try {
+    // Download image from Discord
+    const response = await fetch(attachment.url);
+    if (!response.ok) throw new Error(`Failed to download image: ${response.statusText}`);
+    
+    // Convert to base64
+    const buffer = await response.buffer();
+    const base64Image = buffer.toString('base64');
+    
+    // Create image metadata object
+    const imageData = {
+      data: base64Image,
+      contentType: attachment.contentType,
+      name: attachment.name
+    };
+
     const docRef = await db.collection('products').add({
-      image,
+      image: imageData,  // Store metadata object
       name,
       price,
       link,
       created_at: admin.firestore.FieldValue.serverTimestamp()
     });
+    
     return docRef.id;
   } catch (error) {
-    console.error('Firestore error:', error);
+    console.error('Image processing error:', error);
     throw new Error('Failed to add product');
   }
 }
+
 
 async function removeProduct(id) {
   try {
@@ -146,48 +169,31 @@ client.on('interactionCreate', async interaction => {
   try {
     switch (commandName) {
       case 'add': {
-        const image = options.getString('image');
+        const attachment = options.getAttachment('attachment');
         const name = options.getString('name');
         const price = options.getString('price');
         const link = options.getString('link');
         
-        const productId = await addProduct(image, name, price, link);
-        // USE editReply INSTEAD OF reply
-        await interaction.editReply(`✅ Added product: "${name}" (ID: ${productId})`);
-        break;
-      }
-        
-      case 'remove': {
-        const id = options.getString('id');
-        await removeProduct(id);
-        // USE editReply INSTEAD OF reply
-        await interaction.editReply(`✅ Removed product ID: ${id}`);
-        break;
-      }
-        
-      case 'bulk-add': {
-        const data = options.getString('data');
-        let products;
-        
-        try {
-          products = JSON.parse(data);
-          if (!Array.isArray(products)) throw new Error('Not an array');
-        } catch (e) {
-          // USE editReply FOR ERRORS TOO
-          await interaction.editReply('❌ Invalid JSON format. Expected array of products');
+        // Validate attachment
+        if (!attachment || !attachment.contentType || !attachment.contentType.startsWith('image/')) {
+          await interaction.editReply('❌ Please attach a valid image file');
           return;
         }
         
-        const ids = await bulkAddProducts(products);
-        // USE editReply INSTEAD OF reply
-        await interaction.editReply(`✅ Added ${ids.length} products`);
+        // Check image size (max 1MB)
+        if (attachment.size > 1024 * 1024) {
+          await interaction.editReply('❌ Image too large (max 1MB)');
+          return;
+        }
+
+        const productId = await addProduct(attachment, name, price, link);
+        await interaction.editReply(`✅ Added product: "${name}" (ID: ${productId})`);
         break;
       }
+      // ... keep other cases the same ...
     }
   } catch (error) {
-    console.error(`Command error: ${commandName}`, error);
-    // USE editReply FOR ERROR RESPONSES
-    await interaction.editReply(`❌ Error: ${error.message}`);
+    // ... error handling ...
   }
 });
 

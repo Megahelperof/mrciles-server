@@ -34,21 +34,25 @@ app.get('/api/products', async (req, res) => {
     
     const products = [];
     snapshot.forEach(doc => {
+      const data = doc.data();
+      
+      // Convert base64 images to data URLs
+      if (data.image && data.image.data) {
+        data.imageSrc = `data:${data.image.contentType};base64,${data.image.data}`;
+      }
+      
       products.push({ 
         id: doc.id, 
-        ...doc.data(),
-        // Convert Firestore Timestamp to ISO string for compatibility
-        created_at: doc.data().created_at?.toDate?.()?.toISOString?.() 
+        ...data,
+        created_at: data.created_at?.toDate?.()?.toISOString?.() 
       });
     });
     
     res.json(products);
   } catch (err) {
-    console.error('Firestore error:', err);
-    res.status(500).json({ error: 'Database error' });
+    // ... error handling ...
   }
 });
-
 // HTML route
 app.get('*', (req, res) => {
   res.sendFile('index.html', { root: 'public' });
