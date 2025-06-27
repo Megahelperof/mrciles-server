@@ -1,4 +1,3 @@
-const { Client, GatewayIntentBits } = require('discord.js');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
