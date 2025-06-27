@@ -7,6 +7,8 @@
   },
   "dependencies": {
     "discord.js": "^14.21.0",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.4.0",
     "pg": "^8.16.2"
   }
 }
