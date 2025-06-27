@@ -3,6 +3,7 @@ const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
+const { Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 // 1. Environment Validation
 console.log('Starting bot...');
@@ -74,9 +75,32 @@ const commands = [
   },
   {
     name: 'bulk-add',
-    description: 'Add multiple products (JSON format)',
+    description: 'Add multiple products (up to 5)',
     options: [
-      { name: 'data', description: 'Product data array', type: 3, required: true }
+      { 
+        name: 'images', 
+        description: 'Product images (up to 5)', 
+        type: 11, // Attachment
+        required: true
+      },
+      { 
+        name: 'names', 
+        description: 'Product names (comma separated, same order as images)', 
+        type: 3, 
+        required: true 
+      },
+      { 
+        name: 'prices', 
+        description: 'Product prices (comma separated, same order as images)', 
+        type: 3, 
+        required: true 
+      },
+      { 
+        name: 'links', 
+        description: 'Product links (comma separated, same order as images)', 
+        type: 3, 
+        required: true 
+      }
     ]
   }
 ];
@@ -132,14 +156,14 @@ async function bulkAddProducts(products) {
     const batch = db.batch();
     const addedIds = [];
     
-    products.forEach(product => {
+    for (const product of products) {
       const docRef = db.collection('products').doc();
       batch.set(docRef, {
         ...product,
         created_at: admin.firestore.FieldValue.serverTimestamp()
       });
       addedIds.push(docRef.id);
-    });
+    }
     
     await batch.commit();
     return addedIds;
@@ -190,7 +214,72 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply(`✅ Added product: "${name}" (ID: ${productId})`);
         break;
       }
-      // ... keep other cases the same ...
+    case 'bulk-add': {
+      const imagesOption = interaction.options.get('images');
+      const namesOption = interaction.options.get('names').value;
+      const pricesOption = interaction.options.get('prices').value;
+      const linksOption = interaction.options.get('links').value;
+
+      // Validate inputs
+      const names = namesOption.split(',').map(n => n.trim());
+      const prices = pricesOption.split(',').map(p => p.trim());
+      const links = linksOption.split(',').map(l => l.trim());
+      
+      if (names.length !== prices.length || names.length !== links.length) {
+        await interaction.editReply('❌ Number of names, prices, and links must match');
+        return;
+      }
+      
+      if (names.length < 1 || names.length > 5) {
+        await interaction.editReply('❌ You can only add 1-5 products at once');
+        return;
+      }
+      
+      // Create product previews
+      const products = [];
+      const embeds = [];
+      
+      for (let i = 0; i < names.length; i++) {
+        products.push({
+          name: names[i],
+          price: prices[i],
+          link: links[i]
+        });
+        
+        embeds.push(new EmbedBuilder()
+          .setTitle(`Product #${i+1}`)
+          .setDescription(`**${names[i]}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
+          .setImage(`attachment://preview${i}.png`)
+          .setColor('#3498db')
+        );
+      }
+      
+      // Create confirmation buttons
+      const confirmButton = new ButtonBuilder()
+        .setCustomId('confirm_bulk_add')
+        .setLabel('Confirm')
+        .setStyle(ButtonStyle.Success);
+        
+      const cancelButton = new ButtonBuilder()
+        .setCustomId('cancel_bulk_add')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Danger);
+        
+      const actionRow = new ActionRowBuilder()
+        .addComponents(confirmButton, cancelButton);
+      
+      // Store products in interaction for later use
+      interaction.bulkProducts = products;
+      
+      // Send preview with buttons
+      await interaction.editReply({
+        content: `**Preview of ${products.length} products**\nPlease confirm:`,
+        embeds,
+        files: [new AttachmentBuilder(imagesOption.attachment.url, { name: 'preview0.png' })],
+        components: [actionRow]
+      });
+      break;
+    }
     }
   } catch (error) {
     // ... error handling ...
