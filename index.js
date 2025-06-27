@@ -214,16 +214,12 @@ client.on('interactionCreate', async interaction => {
         break;
       }
     case 'bulk-add': {
-      const imagesOption = interaction.options.get('images');
-      const namesOption = interaction.options.get('names').value;
-      const pricesOption = interaction.options.get('prices').value;
-      const linksOption = interaction.options.get('links').value;
+      const imagesOption = interaction.options.getAttachment('images');
+      const names = interaction.options.getString('names').split(',').map(n => n.trim());
+      const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
+      const links = interaction.options.getString('links').split(',').map(l => l.trim());
 
-      // Validate inputs
-      const names = namesOption.split(',').map(n => n.trim());
-      const prices = pricesOption.split(',').map(p => p.trim());
-      const links = linksOption.split(',').map(l => l.trim());
-      
+      // Validate input lengths
       if (names.length !== prices.length || names.length !== links.length) {
         await interaction.editReply('❌ Number of names, prices, and links must match');
         return;
@@ -234,54 +230,95 @@ client.on('interactionCreate', async interaction => {
         return;
       }
       
-      // Create product previews
-      const products = [];
-      const embeds = [];
-      
-      for (let i = 0; i < names.length; i++) {
-        products.push({
-          name: names[i],
-          price: prices[i],
-          link: links[i]
-        });
-        
-        embeds.push(new EmbedBuilder()
+      // Create preview embeds
+      const embeds = names.map((name, i) => 
+        new EmbedBuilder()
           .setTitle(`Product #${i+1}`)
-          .setDescription(`**${names[i]}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-          .setImage(`attachment://preview${i}.png`)
+          .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
+          .setImage(imagesOption.url) // Use direct URL for preview
           .setColor('#3498db')
-        );
-      }
-      
+      );
+
       // Create confirmation buttons
-      const confirmButton = new ButtonBuilder()
-        .setCustomId('confirm_bulk_add')
-        .setLabel('Confirm')
-        .setStyle(ButtonStyle.Success);
-        
-      const cancelButton = new ButtonBuilder()
-        .setCustomId('cancel_bulk_add')
-        .setLabel('Cancel')
-        .setStyle(ButtonStyle.Danger);
-        
-      const actionRow = new ActionRowBuilder()
-        .addComponents(confirmButton, cancelButton);
-      
-      // Store products in interaction for later use
-      interaction.bulkProducts = products;
-      
-      // Send preview with buttons
+      const actionRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('confirm_bulk_add')
+          .setLabel('Confirm')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('cancel_bulk_add')
+          .setLabel('Cancel')
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      // Store product data in interaction for later use
+      interaction.bulkProducts = names.map((name, i) => ({
+        name,
+        price: prices[i],
+        link: links[i],
+        imageUrl: imagesOption.url // Store URL for later processing
+      }));
+
       await interaction.editReply({
-        content: `**Preview of ${products.length} products**\nPlease confirm:`,
+        content: `**Preview of ${names.length} products**\nPlease confirm:`,
         embeds,
-        files: [new AttachmentBuilder(imagesOption.attachment.url, { name: 'preview0.png' })],
         components: [actionRow]
       });
       break;
     }
     }
   } catch (error) {
-    // ... error handling ...
+    console.error('Command error:', error);
+    await interaction.editReply(`❌ Error: ${error.message}`);
+  }
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton()) return;
+  
+  await interaction.deferUpdate();
+  
+  if (interaction.customId === 'confirm_bulk_add') {
+    try {
+      const products = interaction.message.interaction.bulkProducts;
+      
+      // Process images and add to Firestore
+      const productsWithImages = await Promise.all(products.map(async (product) => {
+        const response = await fetch(product.imageUrl);
+        if (!response.ok) throw new Error('Failed to download image');
+        
+        const buffer = await response.buffer();
+        return {
+          ...product,
+          image: {
+            data: buffer.toString('base64'),
+            contentType: response.headers.get('content-type'),
+            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+          }
+        };
+      }));
+
+      const addedIds = await bulkAddProducts(productsWithImages);
+      await interaction.editReply({
+        content: `✅ Added ${addedIds.length} products successfully!`,
+        embeds: [],
+        components: []
+      });
+    } catch (error) {
+      console.error('Bulk add error:', error);
+      await interaction.editReply({
+        content: `❌ Failed to add products: ${error.message}`,
+        components: []
+      });
+    }
+  }
+  
+  if (interaction.customId === 'cancel_bulk_add') {
+    await interaction.editReply({
+      content: '❌ Bulk add cancelled',
+      embeds: [],
+      components: []
+    });
   }
 });
 
