@@ -140,6 +140,9 @@ client.on('interactionCreate', async interaction => {
     });
   }
 
+  // DEFER THE REPLY IMMEDIATELY
+  await interaction.deferReply({ ephemeral: true });
+
   try {
     switch (commandName) {
       case 'add': {
@@ -149,14 +152,16 @@ client.on('interactionCreate', async interaction => {
         const link = options.getString('link');
         
         const productId = await addProduct(image, name, price, link);
-        await interaction.reply(`✅ Added product: "${name}" (ID: ${productId})`);
+        // USE editReply INSTEAD OF reply
+        await interaction.editReply(`✅ Added product: "${name}" (ID: ${productId})`);
         break;
       }
         
       case 'remove': {
         const id = options.getString('id');
         await removeProduct(id);
-        await interaction.reply(`✅ Removed product ID: ${id}`);
+        // USE editReply INSTEAD OF reply
+        await interaction.editReply(`✅ Removed product ID: ${id}`);
         break;
       }
         
@@ -168,17 +173,21 @@ client.on('interactionCreate', async interaction => {
           products = JSON.parse(data);
           if (!Array.isArray(products)) throw new Error('Not an array');
         } catch (e) {
-          return interaction.reply('❌ Invalid JSON format. Expected array of products');
+          // USE editReply FOR ERRORS TOO
+          await interaction.editReply('❌ Invalid JSON format. Expected array of products');
+          return;
         }
         
         const ids = await bulkAddProducts(products);
-        await interaction.reply(`✅ Added ${ids.length} products`);
+        // USE editReply INSTEAD OF reply
+        await interaction.editReply(`✅ Added ${ids.length} products`);
         break;
       }
     }
   } catch (error) {
     console.error(`Command error: ${commandName}`, error);
-    interaction.reply(`❌ Error: ${error.message}`);
+    // USE editReply FOR ERROR RESPONSES
+    await interaction.editReply(`❌ Error: ${error.message}`);
   }
 });
 
