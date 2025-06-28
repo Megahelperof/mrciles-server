@@ -292,23 +292,24 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
     
     try {
-        // Handle category selection
+        // Handle main category selection
         if (interaction.customId === 'main_category') {
             await interaction.deferUpdate();
             const mainCategory = interaction.values[0];
-            const cachedData = productDataCache.get(interaction.message.id);
             
+            // Retrieve product data from cache
+            const cachedData = productDataCache.get(interaction.message.id);
             if (!cachedData) {
                 return interaction.editReply('❌ Product data expired. Please try the command again.');
             }
             
-            // Check for subcategories
-            if (CATEGORIES[mainCategory]?.length > 0) {
+            // Check if category has subcategories
+            if (CATEGORIES[mainCategory] && CATEGORIES[mainCategory].length > 0) {
+                // Create subcategory menu - FIXED SYNTAX
                 const subCategoryRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('sub_category')
@@ -318,6 +319,7 @@ client.on('interactionCreate', async interaction => {
                                 label: subCat,
                                 value: subCat
                             }))
+                        ) // Added missing parenthesis here
                 );
                 
                 // Update cache with main category
@@ -331,9 +333,11 @@ client.on('interactionCreate', async interaction => {
                     components: [subCategoryRow]
                 });
             } else {
-                // No subcategories - save directly
+                // No subcategories - add product directly
                 const { attachment, name, price, link } = cachedData;
                 const productId = await addProduct(attachment, name, price, link, mainCategory);
+                
+                // Clean up cache
                 productDataCache.delete(interaction.message.id);
                 
                 await interaction.editReply({
@@ -347,14 +351,17 @@ client.on('interactionCreate', async interaction => {
         else if (interaction.customId === 'sub_category') {
             await interaction.deferUpdate();
             const subCategory = interaction.values[0];
-            const cachedData = productDataCache.get(interaction.message.id);
             
+            // Retrieve product data from cache
+            const cachedData = productDataCache.get(interaction.message.id);
             if (!cachedData || !cachedData.mainCategory) {
                 return interaction.editReply('❌ Product data expired. Please try the command again.');
             }
             
             const { attachment, name, price, link, mainCategory } = cachedData;
             const productId = await addProduct(attachment, name, price, link, mainCategory, subCategory);
+            
+            // Clean up cache
             productDataCache.delete(interaction.message.id);
             
             await interaction.editReply({
@@ -415,7 +422,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
     
-    client.on('interactionCreate', async interaction => {
+client.on('interactionCreate', async interaction => {
         if (!interaction.isButton()) return;
         await interaction.deferUpdate();
         if (interaction.customId === 'confirm_bulk_add') {
