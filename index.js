@@ -166,9 +166,12 @@ async function safeGoto(page, url, retries = 3) {
 async function puppeteerCheck(site) {
   let browser;
   try {
+    // Get executable path properly
+    const executablePath = await chromium.executablePath();
+    
     browser = await puppeteerExtra.launch({
-      headless: chromium.headless,
-      executablePath: await chromium.executablePath(),
+      headless: true,
+      executablePath,
       args: [...chromium.args, "--disable-gpu", "--disable-dev-shm-usage"],
       defaultViewport: chromium.defaultViewport,
       ignoreHTTPSErrors: true,
@@ -576,6 +579,7 @@ client.on('interactionCreate', async interaction => {
       else {
         switch (commandName) {
           case 'update': {
+            await interaction.deferReply();
             try {
               const results = await checkSites();
               const pages = chunkArray(results, 5);
@@ -602,6 +606,7 @@ client.on('interactionCreate', async interaction => {
             break;
           }
           case 'invalid': {
+            await interaction.deferReply();  // Add this line
             try {
               const results = await checkSites();
               const invalidSites = results.filter(r => r.error || r.stock.toLowerCase().includes("out of stock") || r.price === "N/A");
@@ -622,6 +627,7 @@ client.on('interactionCreate', async interaction => {
             break;
           }
           case 'prices': {
+            await interaction.deferReply();  // Add this line
             try {
               const amount = options.getInteger("amount");
               const results = await checkSites();
@@ -861,9 +867,11 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply('❌ An error occurred while processing your request');
       } else {
         await interaction.reply({ 
-          content: '❌ An error occurred while processing your request', 
-          ephemeral: true 
+          content: '⛔ You need admin privileges', 
+           flags: 64  // Instead of ephemeral: true
         });
+
+      await interaction.deferReply({ flags: 64 }); // Instead of ephemeral: true
       }
     } catch (replyError) {
       console.error('Error sending error reply:', replyError);
