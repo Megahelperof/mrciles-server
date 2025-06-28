@@ -8,7 +8,6 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
-const chromium = require("@sparticuz/chromium");
 const chromium = require('@sparticuz/chromium-min');
 chromium.setGraphicsMode = false; // Disable GPU
 process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = true; // Skip default download
