@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "name": "Nike Shoes",
+    "url": null,
+    "priceSelector": "b[class^='productPrice_price']",
+    "stockSelector": "button[class*='productButton_soldout']",
+    "checkText": "Sold Out"
+  },
+  {
+    "id": 2,
+    "name": "AdidasShoes",
+    "url": "https://sale.dhgate.com/yTMOY118",
+    "priceSelector": "b[class^='productPrice_price']",
+    "stockSelector": "button[class*='productButton_soldout']",
+    "checkText": "Sold Out"
+  }
+]
