@@ -53,6 +53,15 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             GatewayIntentBits.GuildMessages
         ] 
     });
+
+    const CATEGORIES = {
+        MENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
+        WOMENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
+        KIDS: [],
+        TECH: [],
+        JEWELRY_ACCESSORIES: [],
+        MISC: []
+    };
     
     const commands = [
         {
@@ -90,7 +99,7 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     
     const rest = new REST({ version: '9' }).setToken(process.env.DISCORD_BOT_TOKEN);
     
-    async function addProduct(attachment, name, price, link) {
+    async function addProduct(attachment, name, price, link, mainCategory = '', subCategory = '') {
         try {
             const response = await fetch(attachment.url);
             if (!response.ok) throw new Error(`Failed to download image: ${response.statusText}`);
@@ -106,6 +115,8 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 name,
                 price,
                 link,
+                mainCategory,  // Added category fields
+                subCategory,   // Added category fields
                 created_at: admin.firestore.FieldValue.serverTimestamp()
             });
             return docRef.id;
@@ -114,7 +125,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             throw new Error('Failed to add product');
         }
     }
-    
     async function removeProduct(id) {
         try {
             await db.collection('products').doc(id).delete();
@@ -145,104 +155,136 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
         }
     }
     
-    client.on('interactionCreate', async interaction => {
-        if (!interaction.isCommand()) return;
-        const { commandName, options, member } = interaction;
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+    const { commandName, options, member } = interaction;
+    
+    // Handle help command separately
+    if (commandName === "help") {
+        const helpEmbed = new EmbedBuilder()
+            .setTitle('🔥 Firebase Bot Commands')
+            .setDescription('Manage your product catalog')
+            .setColor('#3498db')
+            .addFields(
+                { name: '/add', value: 'Add a new product with image, name, price and link' },
+                { name: '/remove [id]', value: 'Remove a product by ID' },
+                { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
+            );
         
-        // Handle help command separately
-        if (commandName === "help") {
-            const helpEmbed = new EmbedBuilder()
-                .setTitle('🔥 Firebase Bot Commands')
-                .setDescription('Manage your product catalog')
-                .setColor('#3498db')
-                .addFields(
-                    { name: '/add', value: 'Add a new product with image, name, price and link' },
-                    { name: '/remove [id]', value: 'Remove a product by ID' },
-                    { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
+        return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+    }
+    
+    // Admin-only commands below
+    if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
+        return interaction.reply({ 
+            content: '⛔ You need admin privileges to use this command', 
+            ephemeral: true 
+        });
+    }
+    
+    // Defer reply for admin commands
+    await interaction.deferReply({ ephemeral: true });
+    
+    try {
+        switch (commandName) {
+            case 'add': {
+                const attachment = options.getAttachment('attachment');
+                const name = options.getString('name');
+                const price = options.getString('price');
+                const link = options.getString('link');
+                
+                // Validate attachment
+                if (!attachment || !attachment.contentType || !attachment.contentType.startsWith('image/')) {
+                    await interaction.editReply('❌ Please attach a valid image file');
+                    return;
+                }
+                if (attachment.size > 1024 * 1024) {
+                    await interaction.editReply('❌ Image too large (max 1MB)');
+                    return;
+                }
+                
+                // Create category selection menu
+                const mainCategoryRow = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('main_category')
+                        .setPlaceholder('Select main category')
+                        .addOptions(
+                            Object.keys(CATEGORIES).map(cat => ({
+                                label: cat,
+                                value: cat
+                            }))
+                        )
                 );
-            
-            return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
-        }
-        
-        // Admin-only commands below
-        if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-            return interaction.reply({ 
-                content: '⛔ You need admin privileges to use this command', 
-                ephemeral: true 
-            });
-        }
-        
-        // Defer reply for admin commands
-        await interaction.deferReply({ ephemeral: true });
-        
-        try {
-            switch (commandName) {
-                case 'add': {
-                    const attachment = options.getAttachment('attachment');
-                    const name = options.getString('name');
-                    const price = options.getString('price');
-                    const link = options.getString('link');
-                    if (!attachment || !attachment.contentType || !attachment.contentType.startsWith('image/')) {
-                        await interaction.editReply('❌ Please attach a valid image file');
-                        return;
-                    }
-                    if (attachment.size > 1024 * 1024) {
-                        await interaction.editReply('❌ Image too large (max 1MB)');
-                        return;
-                    }
-                    const productId = await addProduct(attachment, name, price, link);
-                    await interaction.editReply(`✅ Added product: "${name}" (ID: ${productId})`);
-                    break;
-                }
-                case 'bulk-add': {
-                    const imagesOption = interaction.options.getAttachment('images');
-                    const names = interaction.options.getString('names').split(',').map(n => n.trim());
-                    const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
-                    const links = interaction.options.getString('links').split(',').map(l => l.trim());
-                    if (names.length !== prices.length || names.length !== links.length) {
-                        await interaction.editReply('❌ Number of names, prices, and links must match');
-                        return;
-                    }
-                    if (names.length < 1 || names.length > 5) {
-                        await interaction.editReply('❌ You can only add 1-5 products at once');
-                        return;
-                    }
-                    const embeds = names.map((name, i) => 
-                        new EmbedBuilder()
-                            .setTitle(`Product #${i+1}`)
-                            .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-                            .setImage(imagesOption.url)
-                            .setColor('#3498db')
-                    );
-                    const actionRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder()
-                            .setCustomId('confirm_bulk_add')
-                            .setLabel('Confirm')
-                            .setStyle(ButtonStyle.Success),
-                        new ButtonBuilder()
-                            .setCustomId('cancel_bulk_add')
-                            .setLabel('Cancel')
-                            .setStyle(ButtonStyle.Danger)
-                    );
-                    interaction.bulkProducts = names.map((name, i) => ({
-                        name,
-                        price: prices[i],
-                        link: links[i],
-                        imageUrl: imagesOption.url
-                    }));
-                    await interaction.editReply({
-                        content: `**Preview of ${names.length} products**\nPlease confirm:`,
-                        embeds,
-                        components: [actionRow]
-                    });
-                    break;
-                }
+                
+                await interaction.editReply({
+                    content: '✅ Product details received! Please select a category:',
+                    components: [mainCategoryRow]
+                });
+                
+                // Store product data temporarily for category selection
+                interaction.productData = { attachment, name, price, link };
+                break;
             }
-        } catch (error) {
-            console.error('Command error:', error);
-            await interaction.editReply(`❌ Error: ${error.message}`);
+            case 'bulk-add': {
+                const imagesOption = interaction.options.getAttachment('images');
+                const names = interaction.options.getString('names').split(',').map(n => n.trim());
+                const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
+                const links = interaction.options.getString('links').split(',').map(l => l.trim());
+                
+                // Validate bulk input
+                if (names.length !== prices.length || names.length !== links.length) {
+                    await interaction.editReply('❌ Number of names, prices, and links must match');
+                    return;
+                }
+                if (names.length < 1 || names.length > 5) {
+                    await interaction.editReply('❌ You can only add 1-5 products at once');
+                    return;
+                }
+                
+                // Create preview embeds
+                const embeds = names.map((name, i) => 
+                    new EmbedBuilder()
+                        .setTitle(`Product #${i+1}`)
+                        .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
+                        .setImage(imagesOption.url)
+                        .setColor('#3498db')
+                );
+                
+                // Create confirmation buttons
+                const actionRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('confirm_bulk_add')
+                        .setLabel('Confirm')
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId('cancel_bulk_add')
+                        .setLabel('Cancel')
+                        .setStyle(ButtonStyle.Danger)
+                );
+                
+                // Store bulk products temporarily
+                interaction.bulkProducts = names.map((name, i) => ({
+                    name,
+                    price: prices[i],
+                    link: links[i],
+                    imageUrl: imagesOption.url
+                }));
+                
+                await interaction.editReply({
+                    content: `**Preview of ${names.length} products**\nPlease confirm:`,
+                    embeds,
+                    components: [actionRow]
+                });
+                break;
+            }
         }
-    });
+    } catch (error) {
+        console.error('Command error:', error);
+        await interaction.editReply(`❌ Error: ${error.message}`);
+    }
+});
+
     
     client.on('interactionCreate', async interaction => {
         if (!interaction.isButton()) return;
@@ -533,6 +575,8 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             );
         }
     }
+
+    
     
     const client = new Client({
         intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent],
