@@ -1,8 +1,10 @@
+require('dotenv').config();
+
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
-const { Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Partials, StringSelectMenuBuilder } = require('discord.js');
 const fs = require("fs");
 const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
@@ -11,13 +13,13 @@ const cheerio = require("cheerio");
 
 puppeteerExtra.use(StealthPlugin());
 
+// Default selectors and text for product monitoring
+const DEFAULT_PRICE_SELECTOR = "b[class^='productPrice_price']";
+const DEFAULT_STOCK_SELECTOR = "button[class*='productButton_soldout']";
+const DEFAULT_CHECK_TEXT = "Sold Out";
+
 if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     console.log('Starting Firebase bot...');
-    console.log('Environment variables:');
-    console.log(`- DISCORD_BOT_TOKEN: ${process.env.DISCORD_BOT_TOKEN ? 'SET' : 'MISSING'}`);
-    console.log(`- FIREBASE_SERVICE_ACCOUNT: ${process.env.FIREBASE_SERVICE_ACCOUNT ? 'SET' : 'MISSING'}`);
-    console.log(`- ADMIN_ROLE_ID: ${process.env.ADMIN_ROLE_ID ? 'SET' : 'MISSING'}`);
-    
     const missingVars = [];
     if (!process.env.DISCORD_BOT_TOKEN) missingVars.push('DISCORD_BOT_TOKEN');
     if (!process.env.FIREBASE_SERVICE_ACCOUNT) missingVars.push('FIREBASE_SERVICE_ACCOUNT');
@@ -79,7 +81,11 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
                 { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
             ]
-        }
+        },
+        new SlashCommandBuilder()
+            .setName('help')
+            .setDescription('Show all available commands')
+            .toJSON()
     ];
     
     const rest = new REST({ version: '9' }).setToken(process.env.DISCORD_BOT_TOKEN);
@@ -142,6 +148,21 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     client.on('interactionCreate', async interaction => {
         if (!interaction.isCommand()) return;
         const { commandName, options, member } = interaction;
+        
+        if (commandName === "help") {
+            const helpEmbed = new EmbedBuilder()
+                .setTitle('🔥 Firebase Bot Commands')
+                .setDescription('Manage your product catalog')
+                .setColor('#3498db')
+                .addFields(
+                    { name: '/add', value: 'Add a new product with image, name, price and link' },
+                    { name: '/remove [id]', value: 'Remove a product by ID' },
+                    { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
+                );
+            
+            return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+        }
+        
         if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
             return interaction.reply({ 
                 content: '⛔ You need admin privileges to use this command', 
@@ -286,18 +307,31 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     const PRODUCTS_FILE = "./products.json";
     
     let products = [];
+    let lastScrapeResults = [];
+    let scrapeCacheTimestamp = 0;
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes cache
+    
     try {
         if (fs.existsSync(PRODUCTS_FILE)) {
             products = JSON.parse(fs.readFileSync(PRODUCTS_FILE, "utf8"));
         } else {
             fs.writeFileSync(PRODUCTS_FILE, "[]");
         }
+        console.log(`Loaded ${products.length} products`);
     } catch (err) {
         console.error("Error loading products:", err);
     }
     
     function saveProducts() {
         fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(products, null, 2));
+    }
+    
+    function reorganizeIds() {
+        products.sort((a, b) => a.id - b.id);
+        for (let i = 0; i < products.length; i++) {
+            products[i].id = i + 1;
+        }
+        saveProducts();
     }
     
     function generateProductId() {
@@ -385,7 +419,64 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 });
             }
         }
+        lastScrapeResults = results;
+        scrapeCacheTimestamp = Date.now();
         return results;
+    }
+    
+    function parsePrice(priceStr) {
+        if (!priceStr) return null;
+        const cleanStr = priceStr.replace(/[^\d.,]/g, '');
+        const lastComma = cleanStr.lastIndexOf(',');
+        const lastDot = cleanStr.lastIndexOf('.');
+        
+        if (lastComma > lastDot) {
+            return parseFloat(cleanStr.replace(/\./g, '').replace(',', '.'));
+        } else if (lastDot > lastComma) {
+            return parseFloat(cleanStr.replace(/,/g, ''));
+        }
+        
+        return parseFloat(cleanStr);
+    }
+    
+    function getPriceData() {
+        const now = Date.now();
+        if (now - scrapeCacheTimestamp > CACHE_DURATION || lastScrapeResults.length === 0) {
+            return null;
+        }
+        return lastScrapeResults.map(p => {
+            const priceNum = parsePrice(p.price);
+            return {
+                ...p,
+                priceNum: isNaN(priceNum) ? null : priceNum
+            };
+        }).filter(p => p.priceNum !== null);
+    }
+    
+    function findClosestPrices(priceData, targetPrice, count = 5) {
+        if (priceData.length === 0) return [];
+        
+        const withDifference = priceData.map(p => ({
+            ...p,
+            difference: Math.abs(p.priceNum - targetPrice)
+        }));
+        
+        withDifference.sort((a, b) => a.difference - b.difference);
+        
+        return withDifference.slice(0, count);
+    }
+    
+    function findPriceRange(priceData) {
+        if (priceData.length === 0) return [];
+        
+        const sorted = [...priceData].sort((a, b) => a.priceNum - b.priceNum);
+        const results = [];
+        
+        if (sorted.length > 0) results.push(sorted[0]);
+        if (sorted.length > 1) results.push(sorted[sorted.length - 1]);
+        if (sorted.length > 2) results.push(sorted[Math.floor(sorted.length / 2)]);
+        
+        return results.slice(0, 5);
     }
     
     function chunkArray(arr, size) {
@@ -446,25 +537,32 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     client.once("ready", () => {
         console.log(`Logged in as ${client.user.tag}`);
         const commands = [
-            new SlashCommandBuilder().setName("update").setDescription("Check for product updates"),
+            new SlashCommandBuilder().setName("products").setDescription("Check for product updates"),
             new SlashCommandBuilder().setName("invalid").setDescription("Show invalid/dead links"),
             new SlashCommandBuilder()
                 .setName("prices")
-                .setDescription("Show prices with a limit")
-                .addIntegerOption(opt => opt.setName("amount").setDescription("Amount of items to show").setRequired(true)),
+                .setDescription("Show prices closest to target")
+                .addNumberOption(opt => opt.setName("target").setDescription("Target price").setRequired(true)),
             new SlashCommandBuilder()
-                .setName("add")
+                .setName("addlink")
                 .setDescription("Add a new product")
                 .addStringOption(opt => opt.setName("name").setDescription("Product name").setRequired(true))
                 .addStringOption(opt => opt.setName("url").setDescription("Product URL").setRequired(true)),
             new SlashCommandBuilder()
-                .setName("remove")
+                .setName("removelink")
                 .setDescription("Remove a product by ID")
-                .addIntegerOption(opt => opt.setName("id").setDescription("Product ID (1-100)").setRequired(true)),
+                .addIntegerOption(opt => opt.setName("id").setDescription("Product ID").setRequired(true)),
             new SlashCommandBuilder()
-                .setName("bulk")
+                .setName("bulklink")
                 .setDescription("Bulk update products from JSON file")
                 .addAttachmentOption(opt => opt.setName("file").setDescription("JSON file with products").setRequired(true)),
+            new SlashCommandBuilder()
+                .setName("bulkremovelink")
+                .setDescription("Bulk remove products by IDs")
+                .addStringOption(opt => opt.setName("ids").setDescription("Comma separated product IDs").setRequired(true)),
+            new SlashCommandBuilder()
+                .setName("help")
+                .setDescription("Show all available commands")
         ].map(cmd => cmd.toJSON());
         
         const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -474,48 +572,369 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             .catch(console.error);
     });
     
-    const processedInteractions = new Set();
-    
     client.on("interactionCreate", async interaction => {
         if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isStringSelectMenu()) {
             return;
         }
-        if (processedInteractions.has(interaction.id)) {
-            return;
-        }
-        processedInteractions.add(interaction.id);
-        if (processedInteractions.size > 100) {
-            const entries = Array.from(processedInteractions);
-            entries.slice(0, entries.length - 100).forEach(id => processedInteractions.delete(id));
-        }
+        
         try {
             if (interaction.isChatInputCommand()) {
                 const command = interaction.commandName;
-                if (command === "update") {
-                    await interaction.deferReply();
+                
+                if (command === "help") {
+                    const helpEmbed = new EmbedBuilder()
+                        .setTitle('🔍 Scraper Bot Commands')
+                        .setDescription('Monitor product prices and availability')
+                        .setColor('#2ecc71')
+                        .addFields(
+                            { name: '/products', value: 'Check current product status with pagination' },
+                            { name: '/invalid', value: 'Show products with monitoring errors' },
+                            { name: '/prices [target]', value: 'Find products closest to target price' },
+                            { name: '/addlink [name] [url]', value: 'Add new product to monitor' },
+                            { name: '/removelink [id]', value: 'Remove a product by ID' },
+                            { name: '/bulklink [file]', value: 'Bulk import products from JSON file' },
+                            { name: '/bulkremovelink [ids]', value: 'Remove multiple products by comma-separated IDs' }
+                        );
+                    
+                    return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+                }
+                
+                if (command === "products") {
+                    if (interaction.replied || interaction.deferred) {
+                        return;
+                    }
+
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) {
+                            return;
+                        }
+                        throw error;
+                    }
+                    
                     try {
                         const results = await checkSites();
                         const pages = chunkArray(results, 5);
+                        
                         if (pages.length === 0) {
-                            await interaction.editReply("No products to monitor. Add products using /add command.");
+                            await interaction.editReply("No products to monitor. Add products using /addlink command.");
                             return;
                         }
+                        
                         const embedPage = createPageEmbed(pages[0], 0, pages.length);
                         const buttons = createNavigationButtons(0, pages.length);
+                        
                         const message = await interaction.editReply({
                             ...embedPage,
                             components: [buttons],
                         });
+                        
                         client.messageCache = client.messageCache || new Map();
                         client.messageCache.set(message.id, { pages, currentPage: 0, interaction });
                     } catch (error) {
-                        console.error("Error in update command:", error);
+                        console.error("Error in products command:", error);
                         await interaction.editReply("❌ An error occurred while checking products.");
                     }
                 } 
+                else if (command === "invalid") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const results = lastScrapeResults.length > 0 ? lastScrapeResults : await checkSites();
+                        const invalidProducts = results.filter(p => p.error);
+                        
+                        if (invalidProducts.length === 0) {
+                            await interaction.editReply("✅ All products are working correctly!");
+                            return;
+                        }
+                        
+                        const invalidList = invalidProducts.map(p => 
+                            `[${p.id}] **${p.name}**\n${p.url}\nError: ${p.error}`
+                        ).join("\n\n");
+                        
+                        await interaction.editReply({
+                            content: `⚠️ **Invalid Products (${invalidProducts.length})**\n\n${invalidList}`
+                        });
+                    } catch (error) {
+                        console.error("Error in invalid command:", error);
+                        await interaction.editReply("❌ Failed to check invalid products.");
+                    }
+                }
+                else if (command === "prices") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const targetPrice = interaction.options.getNumber("target");
+                        let priceData = getPriceData();
+                        
+                        if (!priceData) {
+                            await interaction.editReply("🔍 Prices are being updated... This might take a moment");
+                            const results = await checkSites();
+                            priceData = results.map(p => {
+                                const priceNum = parsePrice(p.price);
+                                return {
+                                    ...p,
+                                    priceNum: isNaN(priceNum) ? null : priceNum
+                                };
+                            }).filter(p => p.priceNum !== null);
+                        }
+                        
+                        if (priceData.length === 0) {
+                            await interaction.editReply("❌ No valid price data available");
+                            return;
+                        }
+                        
+                        const closestProducts = findClosestPrices(priceData, targetPrice);
+                        let resultProducts = closestProducts;
+                        
+                        if (closestProducts.length === 0 || closestProducts[0].difference > 0) {
+                            resultProducts = findPriceRange(priceData);
+                        }
+                        
+                        if (resultProducts.length === 0) {
+                            await interaction.editReply("❌ No products found with valid prices");
+                            return;
+                        }
+                        
+                        const priceList = resultProducts.map(p => 
+                            `[${p.id}] **${p.name}**\nPrice: \`${p.price}\` (${p.priceNum.toFixed(2)})\nDifference: \`${p.difference ? p.difference.toFixed(2) : "N/A"}\``
+                        ).join("\n\n");
+                        
+                        await interaction.editReply({
+                            content: `💰 **Product Prices (Target: ${targetPrice})**\n\n${priceList}`
+                        });
+                    } catch (error) {
+                        console.error("Error in prices command:", error);
+                        await interaction.editReply("❌ Failed to retrieve prices.");
+                    }
+                }
+                else if (command === "addlink") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const name = interaction.options.getString("name");
+                        const url = interaction.options.getString("url");
+                        
+                        if (!name || !url) {
+                            await interaction.editReply("❌ Both name and URL are required.");
+                            return;
+                        }
+                        
+                        const id = generateProductId();
+                        if (!id) {
+                            await interaction.editReply("❌ Maximum product limit reached (100 products)");
+                            return;
+                        }
+                        
+                        const newProduct = {
+                            id,
+                            name,
+                            url,
+                            priceSelector: DEFAULT_PRICE_SELECTOR,
+                            stockSelector: DEFAULT_STOCK_SELECTOR,
+                            checkText: DEFAULT_CHECK_TEXT
+                        };
+                        
+                        products.push(newProduct);
+                        saveProducts();
+                        
+                        await interaction.editReply(`✅ Added product: **${name}** (ID: ${id})\n${url}`);
+                    } catch (error) {
+                        console.error("Error in addlink command:", error);
+                        await interaction.editReply("❌ Failed to add product.");
+                    }
+                }
+                else if (command === "removelink") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const id = interaction.options.getInteger("id");
+                        const index = products.findIndex(p => p.id === id);
+                        
+                        if (index === -1) {
+                            await interaction.editReply(`❌ Product with ID ${id} not found.`);
+                            return;
+                        }
+                        
+                        const productName = products[index].name;
+                        products.splice(index, 1);
+                        saveProducts();
+                        reorganizeIds();
+                        
+                        await interaction.editReply(`✅ Removed product: **${productName}** (ID: ${id})`);
+                    } catch (error) {
+                        console.error("Error in removelink command:", error);
+                        await interaction.editReply("❌ Failed to remove product.");
+                    }
+                }
+                else if (command === "bulkremovelink") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const idsInput = interaction.options.getString("ids");
+                        const idsToRemove = idsInput.split(',').map(id => parseInt(id.trim()));
+                        
+                        if (idsToRemove.some(isNaN)) {
+                            await interaction.editReply("❌ Invalid IDs format. Please use comma-separated numbers.");
+                            return;
+                        }
+                        
+                        const validIds = new Set(products.map(p => p.id));
+                        const invalidIds = idsToRemove.filter(id => !validIds.has(id));
+                        
+                        if (invalidIds.length > 0) {
+                            await interaction.editReply(`❌ These IDs are invalid: ${invalidIds.join(', ')}`);
+                            return;
+                        }
+                        
+                        const removedProducts = [];
+                        products = products.filter(p => {
+                            if (idsToRemove.includes(p.id)) {
+                                removedProducts.push(`${p.id}: ${p.name}`);
+                                return false;
+                            }
+                            return true;
+                        });
+                        
+                        saveProducts();
+                        reorganizeIds();
+                        
+                        await interaction.editReply({
+                            content: `✅ Removed ${removedProducts.length} products:\n${removedProducts.join("\n")}`
+                        });
+                    } catch (error) {
+                        console.error("Error in bulkremovelink command:", error);
+                        await interaction.editReply("❌ Failed to remove products.");
+                    }
+                }
+                else if (command === "bulklink") {
+                    try {
+                        await interaction.deferReply();
+                    } catch (error) {
+                        if (error.code === 40060) return;
+                        throw error;
+                    }
+
+                    try {
+                        const attachment = interaction.options.getAttachment("file");
+                        if (!attachment || !attachment.contentType || !attachment.contentType.includes("json")) {
+                            await interaction.editReply("❌ Please attach a valid JSON file.");
+                            return;
+                        }
+                        
+                        const response = await fetch(attachment.url);
+                        if (!response.ok) throw new Error("Failed to download file");
+                        const jsonData = await response.json();
+                        
+                        if (!Array.isArray(jsonData)) {
+                            await interaction.editReply("❌ Invalid JSON format. Expected an array of products.");
+                            return;
+                        }
+                        
+                        const addedProducts = [];
+                        for (const product of jsonData) {
+                            const id = generateProductId();
+                            if (!id) {
+                                await interaction.editReply("❌ Maximum product limit reached (100 products)");
+                                return;
+                            }
+                            
+                            products.push({
+                                id,
+                                name: product.name || "Unnamed Product",
+                                url: product.url || "",
+                                priceSelector: product.priceSelector || DEFAULT_PRICE_SELECTOR,
+                                stockSelector: product.stockSelector || DEFAULT_STOCK_SELECTOR,
+                                checkText: product.checkText || DEFAULT_CHECK_TEXT
+                            });
+                            addedProducts.push(`${id}: ${product.name || "Unnamed Product"}`);
+                        }
+                        
+                        saveProducts();
+                        
+                        await interaction.editReply({
+                            content: `✅ Added ${jsonData.length} products:\n${addedProducts.join("\n")}`
+                        });
+                    } catch (error) {
+                        console.error("Error in bulklink command:", error);
+                        await interaction.editReply(`❌ Failed to bulk add products: ${error.message}`);
+                    }
+                }
+            }
+            else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+                if (!client.messageCache) return;
+                const cached = client.messageCache.get(interaction.message.id);
+                if (!cached) return;
+                
+                await interaction.deferUpdate();
+                
+                let newPage = cached.currentPage;
+                if (interaction.isButton()) {
+                    const pageIndex = parseInt(interaction.customId.split("_")[1]);
+                    newPage = pageIndex;
+                } else if (interaction.isStringSelectMenu()) {
+                    if (interaction.customId === "select_page") {
+                        newPage = parseInt(interaction.values[0]);
+                    }
+                }
+                
+                const embedPage = createPageEmbed(cached.pages[newPage], newPage, cached.pages.length);
+                const buttons = createNavigationButtons(newPage, cached.pages.length);
+                
+                await interaction.editReply({
+                    content: embedPage.content,
+                    components: [buttons]
+                });
+                
+                cached.currentPage = newPage;
+                client.messageCache.set(interaction.message.id, cached);
             }
         } catch (error) {
             console.error('Error handling interaction:', error);
+            
+            if (error.code === 40060) {
+                return;
+            }
+            
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ 
+                    content: `❌ Error: ${error.message}`
+                });
+            } else if (interaction.deferred) {
+                await interaction.editReply({ 
+                    content: `❌ Error: ${error.message}`
+                });
+            } else {
+                await interaction.followUp({ 
+                    content: `❌ Error: ${error.message}`
+                });
+            }
         }
     });
     
