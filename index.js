@@ -417,38 +417,40 @@ const rest = new REST({ version: '9' }).setToken(process.env.DISCORD_BOT_TOKEN);
 const processedInteractions = new Set();
 
 client.on('interactionCreate', async interaction => {
-  // Only handle the specific interaction types we care about
   if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isStringSelectMenu()) {
     return;
   }
+
   // Prevent processing the same interaction twice
   if (processedInteractions.has(interaction.id)) {
     console.log(`Skipping already processed interaction: ${interaction.id}`);
     return;
   }
   
+    const lockKey = `${interaction.id}_${interaction.user.id}`;
+  if (processedInteractions.has(lockKey)) {
+    console.log(`Skipping already processed interaction: ${lockKey}`);
+    return;
+  }
+  processedInteractions.add(lockKey);
   
   processedInteractions.add(interaction.id);
 
   if (processedInteractions.size > 100) {
-    const entries = Array.from(processedInteractions);
-    entries.slice(0, entries.length - 100).forEach(id => processedInteractions.delete(id));
+    const oldest = Array.from(processedInteractions).slice(0, 20);
+    oldest.forEach(id => processedInteractions.delete(id));
   }
 
   // Defer ALL interactions immediately to prevent timeout
-    if (!interaction.deferred && !interaction.replied) {
-      if (interaction.isChatInputCommand()) {
-        // For commands, defer based on command type
-        const isFirestoreCommand = interaction.commandName.startsWith('product-');
-        await interaction.deferReply({ 
-          flags: isFirestoreCommand ? 64 : 0  // Ephemeral for firestore, public for others
-        });
-      } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
-        // For components, defer update
-        await interaction.deferUpdate();
-      }
+    if (interaction.isChatInputCommand()) {
+      const isFirestoreCommand = interaction.commandName.startsWith('product-');
+      await interaction.deferReply({ 
+        flags: isFirestoreCommand ? 64 : 0  // Use flags instead of ephemeral
+      });
+    } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+      await interaction.deferUpdate();
     }
-
+    
   try {
     // Handle slash commands
     if (interaction.isChatInputCommand()) {
