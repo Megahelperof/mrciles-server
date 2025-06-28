@@ -3,17 +3,9 @@ const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
 const { Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Partials } = require('discord.js');
-const puppeteerExtra = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
-const chromium = require('@sparticuz/chromium-min');
-chromium.setGraphicsMode = false; // Disable GPU
-process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = true; // Skip default download
-
-puppeteerExtra.use(StealthPlugin());
-
 
 // 1. Environment Validation
 console.log('Starting bot...');
@@ -149,63 +141,47 @@ async function bulkAddProducts(products) {
   }
 }
 
-
-// Web Scraping Functions
-async function safeGoto(page, url, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
-      return;
-    } catch (e) {
-      if (i === retries - 1) throw e;
-      await new Promise(r => setTimeout(r, 5000));
-    }
-  }
-}
-
-async function puppeteerCheck(site) {
+// Web Scraping Functions - UPDATED FOR PLAYWRIGHT
+async function playwrightCheck(site) {
   let browser;
   try {
-    // Get executable path properly
-    const executablePath = await chromium.executablePath();
+    // Dynamically import Playwright only when needed
+    const { chromium } = require('playwright');
     
-    browser = await puppeteerExtra.launch({
+    browser = await chromium.launch({
       headless: true,
-      executablePath,
-      args: [...chromium.args, "--disable-gpu", "--disable-dev-shm-usage"],
-      defaultViewport: chromium.defaultViewport,
-      ignoreHTTPSErrors: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      timeout: 30000
     });
     
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36");
+    await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    await safeGoto(page, site.url);
+    // Wait for selectors to appear
+    await page.waitForSelector(site.priceSelector, { timeout: 10000 }).catch(() => {});
+    await page.waitForSelector(site.stockSelector, { timeout: 10000 }).catch(() => {});
 
-    const result = await page.evaluate(
-      (priceSelector, stockSelector) => {
-        const priceEl = document.querySelector(priceSelector);
-        const stockEl = document.querySelector(stockSelector);
-        return {
-          price: priceEl ? priceEl.innerText.trim() : "N/A",
-          stock: stockEl ? stockEl.innerText.trim() : "N/A"
-        };
-      },
-      site.priceSelector,
-      site.stockSelector
-    );
+    const price = await page.$eval(site.priceSelector, el => el.textContent.trim()).catch(() => "N/A");
+    const stock = await page.$eval(site.stockSelector, el => el.textContent.trim()).catch(() => "N/A");
 
     await browser.close();
-    return result;
+    return { price, stock };
   } catch (error) {
     if (browser) await browser.close();
+    console.error(`Playwright error for ${site.url}:`, error.message);
     throw error;
   }
 }
 
 async function axiosFallback(site) {
   try {
-    const res = await axios.get(site.url, { timeout: 15000 });
+    const res = await axios.get(site.url, { 
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      }
+    });
     const $ = cheerio.load(res.data);
 
     const price = $(site.priceSelector).first().text().trim() || "N/A";
@@ -213,6 +189,7 @@ async function axiosFallback(site) {
 
     return { price, stock };
   } catch (err) {
+    console.error(`Axios fallback error for ${site.url}:`, err.message);
     throw new Error("Fallback axios error: " + err.message);
   }
 }
@@ -224,9 +201,11 @@ async function checkSites() {
     try {
       let result;
       try {
-        result = await puppeteerCheck(site);
-      } catch (puppeteerErr) {
-        console.warn(`Puppeteer failed for ${site.name}: ${puppeteerErr.message}`);
+        // First try Playwright
+        result = await playwrightCheck(site);
+      } catch (playwrightErr) {
+        console.warn(`Playwright failed for ${site.name}: ${playwrightErr.message}`);
+        // Fallback to Axios if Playwright fails
         result = await axiosFallback(site);
       }
 
