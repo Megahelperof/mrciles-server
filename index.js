@@ -149,6 +149,7 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
         if (!interaction.isCommand()) return;
         const { commandName, options, member } = interaction;
         
+        // Handle help command separately
         if (commandName === "help") {
             const helpEmbed = new EmbedBuilder()
                 .setTitle('🔥 Firebase Bot Commands')
@@ -163,13 +164,17 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
         }
         
+        // Admin-only commands below
         if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
             return interaction.reply({ 
                 content: '⛔ You need admin privileges to use this command', 
                 ephemeral: true 
             });
         }
+        
+        // Defer reply for admin commands
         await interaction.deferReply({ ephemeral: true });
+        
         try {
             switch (commandName) {
                 case 'add': {
@@ -599,20 +604,12 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                     return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
                 }
                 
+                // Defer reply for all other commands
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.deferReply();
+                }
+                
                 if (command === "products") {
-                    if (interaction.replied || interaction.deferred) {
-                        return;
-                    }
-
-                    try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) {
-                            return;
-                        }
-                        throw error;
-                    }
-                    
                     try {
                         const results = await checkSites();
                         const pages = chunkArray(results, 5);
@@ -639,13 +636,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 } 
                 else if (command === "invalid") {
                     try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
-                    try {
                         const results = lastScrapeResults.length > 0 ? lastScrapeResults : await checkSites();
                         const invalidProducts = results.filter(p => p.error);
                         
@@ -667,13 +657,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                     }
                 }
                 else if (command === "prices") {
-                    try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
                     try {
                         const targetPrice = interaction.options.getNumber("target");
                         let priceData = getPriceData();
@@ -721,13 +704,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 }
                 else if (command === "addlink") {
                     try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
-                    try {
                         const name = interaction.options.getString("name");
                         const url = interaction.options.getString("url");
                         
@@ -762,13 +738,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                 }
                 else if (command === "removelink") {
                     try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
-                    try {
                         const id = interaction.options.getInteger("id");
                         const index = products.findIndex(p => p.id === id);
                         
@@ -789,13 +758,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                     }
                 }
                 else if (command === "bulkremovelink") {
-                    try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
                     try {
                         const idsInput = interaction.options.getString("ids");
                         const idsToRemove = idsInput.split(',').map(id => parseInt(id.trim()));
@@ -834,13 +796,6 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
                     }
                 }
                 else if (command === "bulklink") {
-                    try {
-                        await interaction.deferReply();
-                    } catch (error) {
-                        if (error.code === 40060) return;
-                        throw error;
-                    }
-
                     try {
                         const attachment = interaction.options.getAttachment("file");
                         if (!attachment || !attachment.contentType || !attachment.contentType.includes("json")) {
