@@ -9,8 +9,12 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const chromium = require("@sparticuz/chromium");
+const chromium = require('@sparticuz/chromium-min');
+chromium.setGraphicsMode = false; // Disable GPU
+process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = true; // Skip default download
 
 puppeteerExtra.use(StealthPlugin());
+
 
 // 1. Environment Validation
 console.log('Starting bot...');
@@ -146,6 +150,7 @@ async function bulkAddProducts(products) {
   }
 }
 
+
 // Web Scraping Functions
 async function safeGoto(page, url, retries = 3) {
   for (let i = 0; i < retries; i++) {
@@ -160,35 +165,40 @@ async function safeGoto(page, url, retries = 3) {
 }
 
 async function puppeteerCheck(site) {
-  const browser = await puppeteerExtra.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-http2"],
-  });
-  const page = await browser.newPage();
+  let browser;
+  try {
+    browser = await puppeteerExtra.launch({
+      headless: chromium.headless,
+      executablePath: await chromium.executablePath(),
+      args: [...chromium.args, "--disable-gpu", "--disable-dev-shm-usage"],
+      defaultViewport: chromium.defaultViewport,
+      ignoreHTTPSErrors: true,
+    });
+    
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36");
 
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-  );
+    await safeGoto(page, site.url);
 
-  await safeGoto(page, site.url);
+    const result = await page.evaluate(
+      (priceSelector, stockSelector) => {
+        const priceEl = document.querySelector(priceSelector);
+        const stockEl = document.querySelector(stockSelector);
+        return {
+          price: priceEl ? priceEl.innerText.trim() : "N/A",
+          stock: stockEl ? stockEl.innerText.trim() : "N/A"
+        };
+      },
+      site.priceSelector,
+      site.stockSelector
+    );
 
-  const result = await page.evaluate(
-    (priceSelector, stockSelector) => {
-      const priceEl = document.querySelector(priceSelector);
-      const stockEl = document.querySelector(stockSelector);
-
-      const price = priceEl ? priceEl.innerText.trim() : "N/A";
-      const stock = stockEl ? stockEl.innerText.trim() : "N/A";
-
-      return { price, stock };
-    },
-    site.priceSelector,
-    site.stockSelector
-  );
-
-  await browser.close();
-
-  return result;
+    await browser.close();
+    return result;
+  } catch (error) {
+    if (browser) await browser.close();
+    throw error;
+  }
 }
 
 async function axiosFallback(site) {
@@ -447,6 +457,20 @@ client.on('interactionCreate', async interaction => {
     entries.slice(0, entries.length - 100).forEach(id => processedInteractions.delete(id));
   }
 
+  // Defer ALL interactions immediately to prevent timeout
+  if (!interaction.deferred && !interaction.replied) {
+    try {
+      if (interaction.isChatInputCommand()) {
+        await interaction.deferReply({ ephemeral: true });
+      } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+        await interaction.deferUpdate();
+      }
+    } catch (deferError) {
+      console.error('Error deferring interaction:', deferError);
+      return;
+    }
+  }
+
   try {
     // Handle slash commands
     if (interaction.isChatInputCommand()) {
@@ -456,17 +480,9 @@ client.on('interactionCreate', async interaction => {
       if (commandName.startsWith('product-')) {
         // Admin check
         if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-          if (!interaction.replied && !interaction.deferred) {
-            return interaction.reply({ 
-              content: '⛔ You need admin privileges to use this command', 
-              ephemeral: true 
-            });
-          }
+          await interaction.editReply('⛔ You need admin privileges to use this command');
           return;
         }
-
-        // Defer the reply immediately
-        await interaction.deferReply({ ephemeral: true });
 
         try {
           switch (commandName) {
@@ -520,7 +536,7 @@ client.on('interactionCreate', async interaction => {
                 new EmbedBuilder()
                   .setTitle(`Product #${i+1}`)
                   .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-                  .setImage(imagesOption.url) // Use direct URL for preview
+                  .setImage(imagesOption.url)
                   .setColor('#3498db')
               );
 
@@ -541,7 +557,7 @@ client.on('interactionCreate', async interaction => {
                 name,
                 price: prices[i],
                 link: links[i],
-                imageUrl: imagesOption.url // Store URL for later processing
+                imageUrl: imagesOption.url
               }));
 
               await interaction.editReply({
@@ -561,10 +577,6 @@ client.on('interactionCreate', async interaction => {
       else {
         switch (commandName) {
           case 'update': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            await interaction.deferReply();
-            
             try {
               const results = await checkSites();
               const pages = chunkArray(results, 5);
@@ -586,17 +598,11 @@ client.on('interactionCreate', async interaction => {
               client.messageCache.set(message.id, { pages, currentPage: 0, interaction });
             } catch (error) {
               console.error("Error in update command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while checking products.");
-              }
+              await interaction.editReply("❌ An error occurred while checking products.");
             }
             break;
           }
           case 'invalid': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            await interaction.deferReply();
-            
             try {
               const results = await checkSites();
               const invalidSites = results.filter(r => r.error || r.stock.toLowerCase().includes("out of stock") || r.price === "N/A");
@@ -612,19 +618,13 @@ client.on('interactionCreate', async interaction => {
               await interaction.editReply(lines.join("\n\n"));
             } catch (error) {
               console.error("Error in invalid command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while checking invalid sites.");
-              }
+              await interaction.editReply("❌ An error occurred while checking invalid sites.");
             }
             break;
           }
           case 'prices': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            const amount = options.getInteger("amount");
-            await interaction.deferReply();
-            
             try {
+              const amount = options.getInteger("amount");
               const results = await checkSites();
               const limited = results.slice(0, amount);
               const lines = limited.map(s =>
@@ -635,17 +635,11 @@ client.on('interactionCreate', async interaction => {
               await interaction.editReply(lines.join("\n\n"));
             } catch (error) {
               console.error("Error in prices command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while fetching prices.");
-              }
+              await interaction.editReply("❌ An error occurred while fetching prices.");
             }
             break;
           }
           case 'add': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            await interaction.deferReply({ flags: 64 });
-            
             try {
               const name = options.getString("name");
               const url = options.getString("url");
@@ -676,17 +670,11 @@ client.on('interactionCreate', async interaction => {
               await interaction.editReply(`✅ Added product [${id}] ${name}\n${url}`);
             } catch (error) {
               console.error("Error in add command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while adding the product.");
-              }
+              await interaction.editReply("❌ An error occurred while adding the product.");
             }
             break;
           }
           case 'remove': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            await interaction.deferReply({ flags: 64 });
-            
             try {
               const id = options.getInteger("id");
 
@@ -702,17 +690,11 @@ client.on('interactionCreate', async interaction => {
               await interaction.editReply(`✅ Removed product [${id}] ${removed.name}`);
             } catch (error) {
               console.error("Error in remove command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while removing the product.");
-              }
+              await interaction.editReply("❌ An error occurred while removing the product.");
             }
             break;
           }
           case 'bulk': {
-            if (interaction.replied || interaction.deferred) return;
-            
-            await interaction.deferReply({ flags: 64 });
-            
             try {
               const attachment = options.getAttachment("file");
 
@@ -736,7 +718,7 @@ client.on('interactionCreate', async interaction => {
                 if (products.length + addedProducts.length >= 100) {
                   await interaction.followUp({ 
                     content: `⚠️ Stopped importing: Reached maximum of 100 products`,
-                    flags: 64
+                    ephemeral: true
                   });
                   break;
                 }
@@ -745,7 +727,7 @@ client.on('interactionCreate', async interaction => {
                 if (!id) {
                   await interaction.followUp({ 
                     content: `⚠️ Stopped importing: No available IDs (1-100)`,
-                    flags: 64
+                    ephemeral: true
                   });
                   break;
                 }
@@ -775,9 +757,7 @@ client.on('interactionCreate', async interaction => {
               await interaction.editReply(`✅ Imported ${count} products from bulk file`);
             } catch (error) {
               console.error("Error in bulk command:", error);
-              if (!interaction.replied) {
-                await interaction.editReply("❌ An error occurred while processing the bulk file.");
-              }
+              await interaction.editReply("❌ An error occurred while processing the bulk file.");
             }
             break;
           }
@@ -789,8 +769,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isButton()) {
       // Firestore bulk add buttons
       if (interaction.customId.startsWith('product_')) {
-        await interaction.deferUpdate();
-        
         if (interaction.customId === 'product_confirm_bulk_add') {
           try {
             const products = interaction.message.interaction.bulkProducts;
@@ -825,7 +803,6 @@ client.on('interactionCreate', async interaction => {
             });
           }
         }
-        
         else if (interaction.customId === 'product_cancel_bulk_add') {
           await interaction.editReply({
             content: '❌ Bulk add cancelled',
@@ -838,18 +815,14 @@ client.on('interactionCreate', async interaction => {
       else {
         const messageData = client.messageCache?.get(interaction.message.id);
         if (!messageData) {
-          if (!interaction.replied && !interaction.deferred) {
-            return interaction.reply({ content: "Pagination data expired.", flags: 64 });
-          }
+          await interaction.editReply({ content: "Pagination data expired.", ephemeral: true });
           return;
         }
 
-        if (interaction.replied || interaction.deferred) return;
-        await interaction.deferUpdate();
-
         const requestedPage = parseInt(interaction.customId.split("_")[1]);
         if (isNaN(requestedPage) || requestedPage < 0 || requestedPage >= messageData.pages.length) {
-          return interaction.followUp({ content: "Invalid page selected.", flags: 64 });
+          await interaction.editReply({ content: "Invalid page selected.", ephemeral: true });
+          return;
         }
 
         messageData.currentPage = requestedPage;
@@ -862,40 +835,39 @@ client.on('interactionCreate', async interaction => {
     }
 
     // Handle select menu interactions (web scraping pagination)
-    if (interaction.isStringSelectMenu()) {
-      if (interaction.customId === "select_page") {
-        const messageData = client.messageCache?.get(interaction.message.id);
-        if (!messageData) {
-          if (!interaction.replied && !interaction.deferred) {
-            return interaction.reply({ content: "Pagination data expired.", flags: 64 });
-          }
-          return;
-        }
-
-        if (interaction.replied || interaction.deferred) return;
-        await interaction.deferUpdate();
-
-        const requestedPage = parseInt(interaction.values[0]);
-        if (isNaN(requestedPage) || requestedPage < 0 || requestedPage >= messageData.pages.length) {
-          return interaction.followUp({ content: "Invalid page selected.", flags: 64 });
-        }
-
-        messageData.currentPage = requestedPage;
-
-        const embedPage = createPageEmbed(messageData.pages[requestedPage], requestedPage, messageData.pages.length);
-        const buttons = createNavigationButtons(requestedPage, messageData.pages.length);
-
-        await interaction.editReply({ ...embedPage, components: [buttons] });
+    if (interaction.isStringSelectMenu() && interaction.customId === "select_page") {
+      const messageData = client.messageCache?.get(interaction.message.id);
+      if (!messageData) {
+        await interaction.editReply({ content: "Pagination data expired.", ephemeral: true });
+        return;
       }
+
+      const requestedPage = parseInt(interaction.values[0]);
+      if (isNaN(requestedPage) || requestedPage < 0 || requestedPage >= messageData.pages.length) {
+        await interaction.editReply({ content: "Invalid page selected.", ephemeral: true });
+        return;
+      }
+
+      messageData.currentPage = requestedPage;
+
+      const embedPage = createPageEmbed(messageData.pages[requestedPage], requestedPage, messageData.pages.length);
+      const buttons = createNavigationButtons(requestedPage, messageData.pages.length);
+
+      await interaction.editReply({ ...embedPage, components: [buttons] });
     }
   } catch (error) {
     console.error('Error handling interaction:', error);
-    if (!interaction.replied && !interaction.deferred) {
-      try {
-        await interaction.reply({ content: '❌ An error occurred while processing your request', ephemeral: true });
-      } catch (replyError) {
-        console.error('Error sending error reply:', replyError);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('❌ An error occurred while processing your request');
+      } else {
+        await interaction.reply({ 
+          content: '❌ An error occurred while processing your request', 
+          ephemeral: true 
+        });
       }
+    } catch (replyError) {
+      console.error('Error sending error reply:', replyError);
     }
   }
 });
