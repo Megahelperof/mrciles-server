@@ -8,6 +8,7 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
+const chromium = require("@sparticuz/chromium");
 
 puppeteerExtra.use(StealthPlugin());
 

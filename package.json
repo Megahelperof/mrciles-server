@@ -6,8 +6,11 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "@discordjs/rest": "^2.5.1",
+    "@sparticuz/chromium": "^137.0.1",
     "axios": "^1.10.0",
     "cheerio": "^1.1.0",
+    "discord-api-types": "^0.38.13",
     "discord.js": "^14.21.0",
     "express": "^5.1.0",
     "firebase-admin": "^13.4.0",
