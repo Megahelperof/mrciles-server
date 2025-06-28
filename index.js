@@ -416,41 +416,38 @@ const rest = new REST({ version: '9' }).setToken(process.env.DISCORD_BOT_TOKEN);
 // Track processed interactions to prevent double-processing
 const processedInteractions = new Set();
 
-// Interaction Handling
 client.on('interactionCreate', async interaction => {
   // Only handle the specific interaction types we care about
   if (!interaction.isChatInputCommand() && !interaction.isButton() && !interaction.isStringSelectMenu()) {
     return;
   }
-
   // Prevent processing the same interaction twice
   if (processedInteractions.has(interaction.id)) {
     console.log(`Skipping already processed interaction: ${interaction.id}`);
     return;
   }
   
-  // Add to processed set immediately
+  
   processedInteractions.add(interaction.id);
 
-  // Clean up old interaction IDs (keep only last 100)
   if (processedInteractions.size > 100) {
     const entries = Array.from(processedInteractions);
     entries.slice(0, entries.length - 100).forEach(id => processedInteractions.delete(id));
   }
 
   // Defer ALL interactions immediately to prevent timeout
-  if (!interaction.deferred && !interaction.replied) {
-    try {
+    if (!interaction.deferred && !interaction.replied) {
       if (interaction.isChatInputCommand()) {
-        await interaction.deferReply({ ephemeral: true });
+        // For commands, defer based on command type
+        const isFirestoreCommand = interaction.commandName.startsWith('product-');
+        await interaction.deferReply({ 
+          flags: isFirestoreCommand ? 64 : 0  // Ephemeral for firestore, public for others
+        });
       } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+        // For components, defer update
         await interaction.deferUpdate();
       }
-    } catch (deferError) {
-      console.error('Error deferring interaction:', deferError);
-      return;
     }
-  }
 
   try {
     // Handle slash commands
@@ -846,17 +843,16 @@ client.on('interactionCreate', async interaction => {
         await interaction.editReply('❌ An error occurred while processing your request');
       } else {
         await interaction.reply({ 
-          content: '⛔ You need admin privileges', 
-           flags: 64  // Instead of ephemeral: true
+          content: '❌ An error occurred while processing your request', 
+          flags: 64  // Ephemeral
         });
-
-      await interaction.deferReply({ flags: 64 }); // Instead of ephemeral: true
       }
     } catch (replyError) {
       console.error('Error sending error reply:', replyError);
     }
   }
 });
+
 
 // Startup Sequence
 client.once('ready', async () => {
