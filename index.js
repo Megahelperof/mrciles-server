@@ -85,16 +85,16 @@ const CATEGORIES = {
                 { name: 'id', description: 'Product ID', type: 3, required: true }
             ]
         },
-        {
-            name: 'bulk-add',
-            description: 'Add multiple products (up to 5)',
-            options: [
-                { name: 'images', description: 'Product images (up to 5)', type: 11, required: true },
-                { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
-                { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
-                { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
-            ]
-        },
+{
+    name: 'bulk-add',
+    description: 'Add multiple products (up to 5) with shared image',
+    options: [
+        { name: 'images', description: 'Product image (shared for all products)', type: 11, required: true },
+        { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
+        { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
+        { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
+    ]
+},
         new SlashCommandBuilder()
             .setName('help')
             .setDescription('Show all available commands')
@@ -241,62 +241,71 @@ client.on('interactionCreate', async interaction => {
             });
                 break;
             }
-            case 'bulk-add': {
-                const images = interaction.options.getAttachments('images');
-                const names = interaction.options.getString('names').split(',').map(n => n.trim());
-                const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
-                const links = interaction.options.getString('links').split(',').map(l => l.trim());
-                
-                if (!imagesOption || !imagesOption.contentType || !imagesOption.contentType.startsWith('image/')) {
-                await interaction.editReply('❌ Please attach valid image files');
-                return;
-                }
-                // Validate bulk input
-                if (names.length !== prices.length || names.length !== links.length) {
-                    await interaction.editReply('❌ Number of names, prices, and links must match');
-                    return;
-                }
-                if (names.length < 1 || names.length > 5) {
-                    await interaction.editReply('❌ You can only add 1-5 products at once');
-                    return;
-                }
-                
-                // Create preview embeds
-                const embeds = names.map((name, i) => 
-                    new EmbedBuilder()
-                        .setTitle(`Product #${i+1}`)
-                        .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-                        .setImage(imagesOption.url)
-                        .setColor('#3498db')
-                );
-                
-                // Create confirmation buttons
-                const actionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('confirm_bulk_add')
-                        .setLabel('Confirm')
-                        .setStyle(ButtonStyle.Success),
-                    new ButtonBuilder()
-                        .setCustomId('cancel_bulk_add')
-                        .setLabel('Cancel')
-                        .setStyle(ButtonStyle.Danger)
-                );
-                
-                // Store bulk products temporarily
-                interaction.bulkProducts = names.map((name, i) => ({
-                    name,
-                    price: prices[i],
-                    link: links[i],
-                    imageUrl: imagesOption.url
-                }));
-                
-                await interaction.editReply({
-                    content: `**Preview of ${names.length} products**\nPlease confirm:`,
-                    embeds,
-                    components: [actionRow]
-                });
-                break;
-            }
+case 'bulk-add': {
+    // Get single image attachment (Discord doesn't support multiple attachments in one option)
+    const imageAttachment = options.getAttachment('images'); // Changed from getAttachments to getAttachment
+    const names = options.getString('names').split(',').map(n => n.trim());
+    const prices = options.getString('prices').split(',').map(p => p.trim());
+    const links = options.getString('links').split(',').map(l => l.trim());
+    
+    // Validate the single image attachment
+    if (!imageAttachment || !imageAttachment.contentType || !imageAttachment.contentType.startsWith('image/')) {
+        await interaction.editReply('❌ Please attach a valid image file');
+        return;
+    }
+    
+    // Validate bulk input
+    if (names.length !== prices.length || names.length !== links.length) {
+        await interaction.editReply('❌ Number of names, prices, and links must match');
+        return;
+    }
+    if (names.length < 1 || names.length > 5) {
+        await interaction.editReply('❌ You can only add 1-5 products at once');
+        return;
+    }
+    
+    // Create preview embeds (all products will use the same image)
+    const embeds = names.map((name, i) => 
+        new EmbedBuilder()
+            .setTitle(`Product #${i+1}`)
+            .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
+            .setImage(imageAttachment.url) // Fixed variable name
+            .setColor('#3498db')
+    );
+    
+    // Create confirmation buttons
+    const actionRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('confirm_bulk_add')
+            .setLabel('Confirm')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('cancel_bulk_add')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Danger)
+    );
+    
+    // Store bulk products in cache using message ID
+    const message = await interaction.editReply({
+        content: `**Preview of ${names.length} products**\nNote: All products will use the same image.\nPlease confirm:`,
+        embeds,
+        components: [actionRow]
+    });
+    
+    // Store the data in interaction cache
+    interactionCache.set(message.id, {
+        type: 'bulk_preview',
+        products: names.map((name, i) => ({
+            name,
+            price: prices[i],
+            link: links[i],
+            imageUrl: imageAttachment.url,
+            contentType: imageAttachment.contentType,
+            fileName: imageAttachment.name
+        }))
+    });
+    break;
+}
         }
     } catch (error) {
         console.error('Command error:', error);
@@ -309,55 +318,76 @@ client.on('interactionCreate', async interaction => {
     
     try {
         // Handle bulk add confirmation
-        if (interaction.customId === 'confirm_bulk_add') {
-            await interaction.deferUpdate();
-            try {
-                const products = interaction.message.interaction.bulkProducts;
-                const productsWithImages = await Promise.all(products.map(async (product) => {
-                    const response = await fetch(product.imageUrl);
-                    if (!response.ok) throw new Error('Failed to download image');
-                    const buffer = await response.buffer();
-                    return {
-                        ...product,
-                        image: {
-                            data: buffer.toString('base64'),
-                            contentType: response.headers.get('content-type'),
-                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-                        }
-                    };
-                }));
-                
-                interactionCache.set(interaction.message.id, {
-                    type: 'bulk',
-                    products: productsWithImages
-                });
-
-                const mainCategoryRow = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('main_category')
-                        .setPlaceholder('Select category for all products')
-                        .addOptions(
-                            Object.keys(CATEGORIES).map(cat => ({
-                                label: cat,
-                                value: cat
-                            })) // Fixed missing parenthesis
-                        ) // Added closing parenthesis
-                );
-                
-                await interaction.editReply({
-                    content: '✅ Products confirmed! Please select a category:',
-                    embeds: [],
-                    components: [mainCategoryRow]
-                });
-                
-            } catch (error) {
-                console.error('Bulk add error:', error);
-                await interaction.editReply({
-                    content: `❌ Failed to add products: ${error.message}`,
-                    components: []
-                });
-            }
+// Replace your bulk confirmation handler with this:
+if (interaction.customId === 'confirm_bulk_add') {
+    await interaction.deferUpdate();
+    try {
+        const cachedData = interactionCache.get(interaction.message.id);
+        if (!cachedData || cachedData.type !== 'bulk_preview') {
+            return interaction.editReply({
+                content: '❌ Product data expired. Please try again.',
+                components: []
+            });
         }
+        
+        // Download image and convert to base64 for all products
+        const productsWithImages = await Promise.all(cachedData.products.map(async (product) => {
+            const response = await fetch(product.imageUrl);
+            if (!response.ok) throw new Error('Failed to download image');
+            const buffer = await response.buffer();
+            return {
+                ...product,
+                image: {
+                    data: buffer.toString('base64'),
+                    contentType: product.contentType,
+                    name: product.fileName
+                }
+            };
+        }));
+        
+        // Update cache with processed images
+        interactionCache.set(interaction.message.id, {
+            type: 'bulk',
+            products: productsWithImages
+        });
+
+        const mainCategoryRow = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('main_category')
+                .setPlaceholder('Select category for all products')
+                .addOptions(
+                    Object.keys(CATEGORIES).map(cat => ({
+                        label: cat,
+                        value: cat
+                    }))
+                )
+        );
+        
+        await interaction.editReply({
+            content: '✅ Products confirmed! Please select a category:',
+            embeds: [],
+            components: [mainCategoryRow]
+        });
+        
+    } catch (error) {
+        console.error('Bulk add error:', error);
+        await interaction.editReply({
+            content: `❌ Failed to add products: ${error.message}`,
+            components: []
+        });
+    }
+}
+
+// Add cancel handler
+else if (interaction.customId === 'cancel_bulk_add') {
+    await interaction.deferUpdate();
+    interactionCache.delete(interaction.message.id);
+    await interaction.editReply({
+        content: '❌ Bulk add cancelled.',
+        embeds: [],
+        components: []
+    });
+}
         
         // Handle main category selection
         else if (interaction.customId === 'main_category') {
