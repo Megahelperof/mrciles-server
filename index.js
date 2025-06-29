@@ -237,68 +237,70 @@ client.on('interactionCreate', async interaction => {
                 break;
             }
             case 'bulk-add': {
-                const imagesOption = interaction.options.getAttachment('images');
-                const names = interaction.options.getString('names').split(',').map(n => n.trim());
-                const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
-                const links = interaction.options.getString('links').split(',').map(l => l.trim());
-                
-                // Validate bulk input
-                if (names.length !== prices.length || names.length !== links.length) {
-                    await interaction.editReply('❌ Number of names, prices, and links must match');
-                    return;
-                }
-                if (names.length < 1 || names.length > 5) {
-                    await interaction.editReply('❌ You can only add 1-5 products at once');
-                    return;
-                }
-                
-                // Create preview embeds
-                const embeds = names.map((name, i) => 
-                    new EmbedBuilder()
-                        .setTitle(`Product #${i+1}`)
-                        .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-                        .setImage(imagesOption.url)
-                        .setColor('#3498db')
-                );
-                
-                // Create confirmation buttons
-                const actionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('confirm_bulk_add')
-                        .setLabel('Confirm')
-                        .setStyle(ButtonStyle.Success),
-                    new ButtonBuilder()
-                        .setCustomId('cancel_bulk_add')
-                        .setLabel('Cancel')
-                        .setStyle(ButtonStyle.Danger)
-                );
-                
-        interaction.bulkProducts = names.map((name, i) => ({
-            name,
-            price: prices[i],
-            link: links[i],
-            imageUrl: imagesOption.url
-        }));
+    const imageAttachments = [];
+    for (let i = 1; i <= 5; i++) {
+        const attachment = interaction.options.getAttachment(`image${i}`);
+        if (attachment) {
+            imageAttachments.push(attachment);
+        }
+    }
 
-        // Create category selection menu
-        const mainCategoryRow = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('bulk_main_category')
-                .setPlaceholder('Select main category for ALL products')
-                .addOptions(
-                    Object.keys(CATEGORIES).map(cat => ({
-                        label: cat,
-                        value: cat
-                    }))
-                )
-        );
+    const names = interaction.options.getString('names').split(',').map(n => n.trim());
+    const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
+    const links = interaction.options.getString('links').split(',').map(l => l.trim());
 
-        await interaction.editReply({
-            content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
-            embeds,
-            components: [mainCategoryRow]
-        });
-        break;
+    // Validate input lengths
+    if (imageAttachments.length === 0) {
+        await interaction.editReply('❌ Please attach at least one image');
+        return;
+    }
+    if (names.length !== imageAttachments.length || 
+        names.length !== prices.length || 
+        names.length !== links.length) {
+        await interaction.editReply('❌ Number of names, prices, links, and images must match');
+        return;
+    }
+    if (names.length < 1 || names.length > 5) {
+        await interaction.editReply('❌ You can only add 1-5 products at once');
+        return;
+    }
+
+    // Create preview embeds with correct images
+    const embeds = names.map((name, i) => 
+        new EmbedBuilder()
+            .setTitle(`Product #${i+1}`)
+            .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
+            .setImage(imageAttachments[i].url)
+            .setColor('#3498db')
+    );
+
+    // Store products with their respective image URLs
+    interaction.bulkProducts = names.map((name, i) => ({
+        name,
+        price: prices[i],
+        link: links[i],
+        imageUrl: imageAttachments[i].url
+    }));
+
+    // Create category selection menu
+    const mainCategoryRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('bulk_main_category')
+            .setPlaceholder('Select main category for ALL products')
+            .addOptions(
+                Object.keys(CATEGORIES).map(cat => ({
+                    label: cat,
+                    value: cat
+                }))
+            )
+    );
+
+    await interaction.editReply({
+        content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
+        embeds,
+        components: [mainCategoryRow]
+    });
+    break;
             }
         }
     } catch (error) {
@@ -852,33 +854,88 @@ client.on('interactionCreate', async interaction => {
     client.once("ready", () => {
         console.log(`Logged in as ${client.user.tag}`);
         const commands = [
-            new SlashCommandBuilder().setName("products").setDescription("Check for product updates"),
-            new SlashCommandBuilder().setName("invalid").setDescription("Show invalid/dead links"),
-            new SlashCommandBuilder()
-                .setName("prices")
-                .setDescription("Show prices closest to target")
-                .addNumberOption(opt => opt.setName("target").setDescription("Target price").setRequired(true)),
-            new SlashCommandBuilder()
-                .setName("addlink")
-                .setDescription("Add a new product")
-                .addStringOption(opt => opt.setName("name").setDescription("Product name").setRequired(true))
-                .addStringOption(opt => opt.setName("url").setDescription("Product URL").setRequired(true)),
-            new SlashCommandBuilder()
-                .setName("removelink")
-                .setDescription("Remove a product by ID")
-                .addIntegerOption(opt => opt.setName("id").setDescription("Product ID").setRequired(true)),
-            new SlashCommandBuilder()
-                .setName("bulklink")
-                .setDescription("Bulk update products from JSON file")
-                .addAttachmentOption(opt => opt.setName("file").setDescription("JSON file with products").setRequired(true)),
-            new SlashCommandBuilder()
-                .setName("bulkremovelink")
-                .setDescription("Bulk remove products by IDs")
-                .addStringOption(opt => opt.setName("ids").setDescription("Comma separated product IDs").setRequired(true)),
-            new SlashCommandBuilder()
-                .setName("help")
-                .setDescription("Show all available commands")
-        ].map(cmd => cmd.toJSON());
+    new SlashCommandBuilder()
+        .setName('add')
+        .setDescription('Add a new product')
+        .addAttachmentOption(option => 
+            option.setName('attachment')
+                .setDescription('Image attachment')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('name')
+                .setDescription('Product name')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('price')
+                .setDescription('Product price ($XX.XX)')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('link')
+                .setDescription('Product link')
+                .setRequired(true)
+        )
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName('remove')
+        .setDescription('Remove a product')
+        .addStringOption(option =>
+            option.setName('id')
+                .setDescription('Product ID')
+                .setRequired(true)
+        )
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName('bulk-add')
+        .setDescription('Add multiple products (up to 5)')
+        .addAttachmentOption(option => 
+            option.setName('image1')
+                .setDescription('Image for product 1')
+                .setRequired(true)
+        )
+        .addAttachmentOption(option => 
+            option.setName('image2')
+                .setDescription('Image for product 2')
+                .setRequired(false)
+        )
+        .addAttachmentOption(option => 
+            option.setName('image3')
+                .setDescription('Image for product 3')
+                .setRequired(false)
+        )
+        .addAttachmentOption(option => 
+            option.setName('image4')
+                .setDescription('Image for product 4')
+                .setRequired(false)
+        )
+        .addAttachmentOption(option => 
+            option.setName('image5')
+                .setDescription('Image for product 5')
+                .setRequired(false)
+        )
+        .addStringOption(option =>
+            option.setName('names')
+                .setDescription('Product names (comma separated)')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('prices')
+                .setDescription('Product prices (comma separated)')
+                .setRequired(true)
+        )
+        .addStringOption(option =>
+            option.setName('links')
+                .setDescription('Product links (comma separated)')
+                .setRequired(true)
+        )
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('Show all available commands')
+        .toJSON()
+].map(cmd => cmd.toJSON());
         
         const rest = new REST({ version: "10" }).setToken(TOKEN);
         rest
