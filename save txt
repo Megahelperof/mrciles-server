@@ -1,0 +1,41 @@
+client.on('interactionCreate', async interaction => {
+        if (!interaction.isButton()) return;
+        await interaction.deferUpdate();
+        if (interaction.customId === 'confirm_bulk_add') {
+            try {
+                const products = interaction.message.interaction.bulkProducts;
+                const productsWithImages = await Promise.all(products.map(async (product) => {
+                    const response = await fetch(product.imageUrl);
+                    if (!response.ok) throw new Error('Failed to download image');
+                    const buffer = await response.buffer();
+                    return {
+                        ...product,
+                        image: {
+                            data: buffer.toString('base64'),
+                            contentType: response.headers.get('content-type'),
+                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+                        }
+                    };
+                }));
+                const addedIds = await bulkAddProducts(productsWithImages);
+                await interaction.editReply({
+                    content: `✅ Added ${addedIds.length} products successfully!`,
+                    embeds: [],
+                    components: []
+                });
+            } catch (error) {
+                console.error('Bulk add error:', error);
+                await interaction.editReply({
+                    content: `❌ Failed to add products: ${error.message}`,
+                    components: []
+                });
+            }
+        }
+        if (interaction.customId === 'cancel_bulk_add') {
+            await interaction.editReply({
+                content: '❌ Bulk add cancelled',
+                embeds: [],
+                components: []
+            });
+        }
+    });

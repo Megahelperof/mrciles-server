@@ -46,7 +46,7 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
         }
     }
 
-    const productDataCache = new Map();
+    const interactionCache = new Map(); // Replaces productDataCache to handle both single and bulk
     
     const db = admin.firestore();
     const client = new Client({ 
@@ -139,25 +139,30 @@ const CATEGORIES = {
         }
     }
     
-    async function bulkAddProducts(products) {
-        try {
-            const batch = db.batch();
-            const addedIds = [];
-            for (const product of products) {
-                const docRef = db.collection('products').doc();
-                batch.set(docRef, {
-                    ...product,
-                    created_at: admin.firestore.FieldValue.serverTimestamp()
-                });
-                addedIds.push(docRef.id);
-            }
-            await batch.commit();
-            return addedIds;
-        } catch (error) {
-            console.error('Firestore error:', error);
-            throw new Error('Failed to add products in bulk');
+async function bulkAddProducts(products) {
+    try {
+        const batch = db.batch();
+        const addedIds = [];
+        for (const product of products) {
+            const docRef = db.collection('products').doc();
+            batch.set(docRef, {
+                image: product.image,
+                name: product.name,
+                price: product.price,
+                link: product.link,
+                mainCategory: product.mainCategory || '',  // Added category handling
+                subCategory: product.subCategory || '',    // Added category handling
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+            addedIds.push(docRef.id);
         }
+        await batch.commit();
+        return addedIds;
+    } catch (error) {
+        console.error('Firestore error:', error);
+        throw new Error('Failed to add products in bulk');
     }
+}
     
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
@@ -227,20 +232,25 @@ client.on('interactionCreate', async interaction => {
                 });
                 
                 // Store product data in cache using message ID
-                productDataCache.set(message.id, { 
-                    attachment, 
-                    name, 
-                    price, 
-                    link 
-                });
+            interactionCache.set(message.id, { 
+                type: 'single',
+                attachment, 
+                name, 
+                price, 
+                link 
+            });
                 break;
             }
             case 'bulk-add': {
-                const imagesOption = interaction.options.getAttachment('images');
+                const images = interaction.options.getAttachments('images');
                 const names = interaction.options.getString('names').split(',').map(n => n.trim());
                 const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
                 const links = interaction.options.getString('links').split(',').map(l => l.trim());
                 
+                if (!imagesOption || !imagesOption.contentType || !imagesOption.contentType.startsWith('image/')) {
+                await interaction.editReply('❌ Please attach valid image files');
+                return;
+                }
                 // Validate bulk input
                 if (names.length !== prices.length || names.length !== links.length) {
                     await interaction.editReply('❌ Number of names, prices, and links must match');
@@ -298,20 +308,73 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu() && !interaction.isButton()) return;
     
     try {
+        // Handle bulk add confirmation
+        if (interaction.customId === 'confirm_bulk_add') {
+            await interaction.deferUpdate();
+            try {
+                const products = interaction.message.interaction.bulkProducts;
+                const productsWithImages = await Promise.all(products.map(async (product) => {
+                    const response = await fetch(product.imageUrl);
+                    if (!response.ok) throw new Error('Failed to download image');
+                    const buffer = await response.buffer();
+                    return {
+                        ...product,
+                        image: {
+                            data: buffer.toString('base64'),
+                            contentType: response.headers.get('content-type'),
+                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+                        }
+                    };
+                }));
+                
+                interactionCache.set(interaction.message.id, {
+                    type: 'bulk',
+                    products: productsWithImages
+                });
+
+                const mainCategoryRow = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('main_category')
+                        .setPlaceholder('Select category for all products')
+                        .addOptions(
+                            Object.keys(CATEGORIES).map(cat => ({
+                                label: cat,
+                                value: cat
+                            })) // Fixed missing parenthesis
+                        ) // Added closing parenthesis
+                );
+                
+                await interaction.editReply({
+                    content: '✅ Products confirmed! Please select a category:',
+                    embeds: [],
+                    components: [mainCategoryRow]
+                });
+                
+            } catch (error) {
+                console.error('Bulk add error:', error);
+                await interaction.editReply({
+                    content: `❌ Failed to add products: ${error.message}`,
+                    components: []
+                });
+            }
+        }
+        
         // Handle main category selection
-        if (interaction.customId === 'main_category') {
+        else if (interaction.customId === 'main_category') {
             await interaction.deferUpdate();
             const mainCategory = interaction.values[0];
             
-            // Retrieve product data from cache
-            const cachedData = productDataCache.get(interaction.message.id);
+            const cachedData = interactionCache.get(interaction.message.id);
             if (!cachedData) {
-                return interaction.editReply('❌ Product data expired. Please try the command again.');
+                return interaction.editReply('❌ Product data expired. Please try again.');
             }
             
-            // Check if category has subcategories
+            interactionCache.set(interaction.message.id, {
+                ...cachedData,
+                mainCategory
+            });
+
             if (CATEGORIES[mainCategory] && CATEGORIES[mainCategory].length > 0) {
-                // Create subcategory menu - FIXED SYNTAX
                 const subCategoryRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('sub_category')
@@ -320,32 +383,38 @@ client.on('interactionCreate', async interaction => {
                             CATEGORIES[mainCategory].map(subCat => ({
                                 label: subCat,
                                 value: subCat
-                            }))
-                        ) // Added missing parenthesis here
+                            })) // Fixed missing parenthesis
+                        ) // Added closing parenthesis
                 );
-                
-                // Update cache with main category
-                productDataCache.set(interaction.message.id, {
-                    ...cachedData,
-                    mainCategory
-                });
                 
                 await interaction.editReply({
                     content: `✅ Main category: **${mainCategory}** selected! Please choose a subcategory:`,
                     components: [subCategoryRow]
                 });
             } else {
-                // No subcategories - add product directly
-                const { attachment, name, price, link } = cachedData;
-                const productId = await addProduct(attachment, name, price, link, mainCategory);
-                
-                // Clean up cache
-                productDataCache.delete(interaction.message.id);
-                
-                await interaction.editReply({
-                    content: `✅ Added product: "${name}" (ID: ${productId})\nCategory: **${mainCategory}**`,
-                    components: []
-                });
+                if (cachedData.type === 'single') {
+                    const { attachment, name, price, link } = cachedData;
+                    const productId = await addProduct(attachment, name, price, link, mainCategory);
+                    interactionCache.delete(interaction.message.id);
+                    await interaction.editReply({
+                        content: `✅ Added product: "${name}" (ID: ${productId})\nCategory: **${mainCategory}**`,
+                        components: []
+                    });
+                } 
+else if (cachedData.type === 'bulk') {
+    const productsWithCategory = cachedData.products.map(product => ({
+        ...product,
+        mainCategory,
+        subCategory: ''
+    }));
+    
+    const addedIds = await bulkAddProducts(productsWithCategory);
+    interactionCache.delete(interaction.message.id);
+    await interaction.editReply({
+        content: `✅ Added ${addedIds.length} products under **${mainCategory}**`,
+        components: []
+    });
+}
             }
         }
         
@@ -354,118 +423,45 @@ client.on('interactionCreate', async interaction => {
             await interaction.deferUpdate();
             const subCategory = interaction.values[0];
             
-            // Retrieve product data from cache
-            const cachedData = productDataCache.get(interaction.message.id);
+            const cachedData = interactionCache.get(interaction.message.id);
             if (!cachedData || !cachedData.mainCategory) {
-                return interaction.editReply('❌ Product data expired. Please try the command again.');
+                return interaction.editReply('❌ Product data expired. Please try again.');
             }
             
-            const { attachment, name, price, link, mainCategory } = cachedData;
-            const productId = await addProduct(attachment, name, price, link, mainCategory, subCategory);
+            const mainCategory = cachedData.mainCategory;
             
-            // Clean up cache
-            productDataCache.delete(interaction.message.id);
-            
-            await interaction.editReply({
-                content: `✅ Added product: "${name}" (ID: ${productId})\nCategory: **${mainCategory} > ${subCategory}**`,
-                components: []
-            });
-        }
-        
-        // Handle bulk add confirmation
-        else if (interaction.customId === 'confirm_bulk_add') {
-            await interaction.deferUpdate();
-            try {
-                const products = interaction.message.interaction.bulkProducts;
-                const productsWithImages = await Promise.all(products.map(async (product) => {
-                    const response = await fetch(product.imageUrl);
-                    if (!response.ok) throw new Error('Failed to download image');
-                    const buffer = await response.buffer();
-                    return {
-                        ...product,
-                        image: {
-                            data: buffer.toString('base64'),
-                            contentType: response.headers.get('content-type'),
-                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-                        }
-                    };
-                }));
-                const addedIds = await bulkAddProducts(productsWithImages);
+            if (cachedData.type === 'single') {
+                const { attachment, name, price, link } = cachedData;
+                const productId = await addProduct(attachment, name, price, link, mainCategory, subCategory);
+                interactionCache.delete(interaction.message.id);
                 await interaction.editReply({
-                    content: `✅ Added ${addedIds.length} products successfully!`,
-                    embeds: [],
+                    content: `✅ Added product: "${name}" (ID: ${productId})\nCategory: **${mainCategory} > ${subCategory}**`,
                     components: []
                 });
-            } catch (error) {
-                console.error('Bulk add error:', error);
-                await interaction.editReply({
-                    content: `❌ Failed to add products: ${error.message}`,
-                    components: []
-                });
-            }
+            } 
+else if (cachedData.type === 'bulk') {
+    const productsWithCategory = cachedData.products.map(product => ({
+        ...product,
+        mainCategory,
+        subCategory
+    }));
+    
+    const addedIds = await bulkAddProducts(productsWithCategory);
+    interactionCache.delete(interaction.message.id);
+    await interaction.editReply({
+        content: `✅ Added ${addedIds.length} products under **${mainCategory} > ${subCategory}**`,
+        components: []
+    });
+}
         }
         
-        // Handle bulk add cancellation
-        else if (interaction.customId === 'cancel_bulk_add') {
-            await interaction.deferUpdate();
-            await interaction.editReply({
-                content: '❌ Bulk add cancelled',
-                embeds: [],
-                components: []
-            });
-        }
+        // ... rest of the code ...
     } catch (error) {
-        console.error('Interaction error:', error);
-        if (interaction.deferred) {
-            await interaction.editReply(`❌ Error: ${error.message}`);
-        } else {
-            await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
-        }
+        // ... error handling ...
     }
 });
     
-client.on('interactionCreate', async interaction => {
-        if (!interaction.isButton()) return;
-        await interaction.deferUpdate();
-        if (interaction.customId === 'confirm_bulk_add') {
-            try {
-                const products = interaction.message.interaction.bulkProducts;
-                const productsWithImages = await Promise.all(products.map(async (product) => {
-                    const response = await fetch(product.imageUrl);
-                    if (!response.ok) throw new Error('Failed to download image');
-                    const buffer = await response.buffer();
-                    return {
-                        ...product,
-                        image: {
-                            data: buffer.toString('base64'),
-                            contentType: response.headers.get('content-type'),
-                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-                        }
-                    };
-                }));
-                const addedIds = await bulkAddProducts(productsWithImages);
-                await interaction.editReply({
-                    content: `✅ Added ${addedIds.length} products successfully!`,
-                    embeds: [],
-                    components: []
-                });
-            } catch (error) {
-                console.error('Bulk add error:', error);
-                await interaction.editReply({
-                    content: `❌ Failed to add products: ${error.message}`,
-                    components: []
-                });
-            }
-        }
-        if (interaction.customId === 'cancel_bulk_add') {
-            await interaction.editReply({
-                content: '❌ Bulk add cancelled',
-                embeds: [],
-                components: []
-            });
-        }
-    });
-    
+
     client.once('ready', async () => {
         console.log(`✅ Bot logged in as ${client.user.tag}!`);
         try {
