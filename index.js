@@ -56,14 +56,16 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
         ] 
     });
 
-    const CATEGORIES = {
-        MENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
-        WOMENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
-        KIDS: [],
-        TECH: [],
-        JEWELRY_ACCESSORIES: [],
-        MISC: []
-    };
+const CATEGORIES = {
+    MENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
+    WOMENS: ['SHOES', 'CLOTHES', 'FRAGRANCE'],
+    KIDS: [],
+    TECH: [],
+    JEWELRY_ACCESSORIES: [],
+    MISC: [],
+    MAIN: []
+};
+
     
     const commands = [
         {
