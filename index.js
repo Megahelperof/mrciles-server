@@ -492,7 +492,9 @@ client.on('interactionCreate', async interaction => {
         // Handle bulk category selection
 if (interaction.customId === 'bulk_main_category') {
     try {
-        await interaction.deferUpdate();
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferUpdate();
+        }
         
 const cached = bulkProductCache.get(interaction.message.id);
 if (!cached || Date.now() - cached.timestamp > 300000) { // 5-minute expiry
@@ -525,10 +527,11 @@ if (!cached || Date.now() - cached.timestamp > 300000) { // 5-minute expiry
             
             // Update cache with main category
 // Update cache with main category
-productDataCache.set(interaction.message.id, {
-    ...cachedData,
-    mainCategory: mainCategory
-});
+    bulkProductCache.set(interaction.message.id, {
+        ...cached,
+        mainCategory: mainCategory,
+        timestamp: Date.now()
+    });
             
             await interaction.editReply({
                 content: `✅ Main category: **${mainCategory}** selected! Please choose a subcategory:`,
@@ -628,7 +631,9 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
     if (interaction.customId === 'confirm_bulk_add') {
-        await interaction.deferUpdate();
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate();
+            }
         try {
             // Get products and category from cache
 const cached = bulkProductCache.get(interaction.message.id);
@@ -1355,6 +1360,14 @@ try {
             }
         }
     });
+    
+    process.on('unhandledRejection', error => {
+    if (error.code === 10062) {
+        console.log('Unhandled Interaction Error (10062) - Ignoring');
+    } else {
+        console.error('Unhandled Rejection:', error);
+    }
+});
     
     client.login(TOKEN);
 } else {
