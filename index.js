@@ -215,16 +215,17 @@ if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
     });
 }
 
-if (interaction.deferred || interaction.replied) return;
-
-try {
-    await interaction.deferReply({ flags: 64 });
-} catch (error) {
-    if (error.code === 10062) {
-        console.log('Ignoring expired interaction');
-        return;
+// Only defer if not already deferred/replied
+if (!interaction.deferred && !interaction.replied) {
+    try {
+        await interaction.deferReply({ flags: 64 });
+    } catch (error) {
+        if (error.code === 10062) {
+            console.log('Ignoring expired interaction');
+            return;
+        }
+        throw error;
     }
-    throw error;
 }
 
     // Defer reply for admin commands
@@ -276,6 +277,8 @@ try {
                 });
                 break;
             }
+
+            
 case 'bulk-add': {
     const imageAttachments = [];
     for (let i = 1; i <= 5; i++) {
@@ -347,6 +350,11 @@ case 'bulk-add': {
                 }))
             )
     );
+
+    if (!interaction.deferred || interaction.replied) {
+    console.error("Cannot edit: Interaction not deferred or already replied");
+    return;
+}
 
     const message = await interaction.editReply({
         content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
@@ -502,8 +510,8 @@ client.on('interactionCreate', async interaction => {
     
     try {
         // Handle 10062 errors
-        if (interaction.deferred || interaction.replied) return;
-        // Handle bulk category selection
+if (interaction.deferred || interaction.replied) return;
+// Handle bulk category selection
 if (interaction.customId === 'bulk_main_category') {
     try {
         if (!interaction.deferred && !interaction.replied) {
@@ -644,10 +652,19 @@ try {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
-    if (interaction.customId === 'confirm_bulk_add') {
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate();
+if (interaction.customId === 'confirm_bulk_add') {
+    // Only defer if NOT already deferred/replied
+    if (!interaction.deferred && !interaction.replied) {
+        try {
+            await interaction.deferUpdate();
+        } catch (error) {
+            if (error.code === 10062) {
+                console.log('Ignoring expired interaction');
+                return;
             }
+            throw error; // Re-throw unexpected errors
+        }
+    }
         try {
             // Get products and category from cache
 const cached = bulkProductCache.get(interaction.message.id);
