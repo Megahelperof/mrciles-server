@@ -481,7 +481,7 @@ bulkProductCache.set(interaction.message.id, {
 else if (interaction.customId === 'confirm_bulk_add') {
     await interaction.deferUpdate();
     try {
-        // Get products and category from cache instead of interaction
+        // Get products and category from cache
         const cached = bulkProductCache.get(interaction.message.id);
         if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
             return interaction.editReply('❌ Session expired. Please restart the command.');
@@ -489,7 +489,13 @@ else if (interaction.customId === 'confirm_bulk_add') {
         
         const { products, mainCategory, subCategory } = cached;
         const productsWithImages = await Promise.all(products.map(async (product) => {
-            const response = await fetch(product.image.url);
+            // Ensure URL has proper protocol
+            let imageUrl = product.image.url;
+            if (!imageUrl.startsWith('http')) {
+                imageUrl = `https://${imageUrl}`;
+            }
+            
+            const response = await fetch(imageUrl);
             if (!response.ok) throw new Error('Failed to download image');
             const buffer = await response.buffer();
             return {
