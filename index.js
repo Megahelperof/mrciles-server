@@ -753,82 +753,75 @@ client.on('interactionCreate', async interaction => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
-if (interaction.customId === 'confirm_bulk_add') {
-    // Skip if already handled
-    if (handledInteractions.has(interaction.id)) {
-        console.log('Skipping already handled interaction:', interaction.id);
-        return;
-    }
-    handledInteractions.add(interaction.id);
-    
-    try {
-        // Safe defer with additional checks
-        if (!interaction.deferred && !interaction.replied) {
-            try {
-                await interaction.deferUpdate();
-            } catch (deferError) {
-                if (deferError.code === 10062 || deferError.code === 'InteractionAlreadyReplied') {
-                    console.log('Interaction already handled:', interaction.id);
-                    return;
-                }
-                throw deferError;
-            }
+    if (interaction.customId === 'confirm_bulk_add') {
+        // Skip if already handled
+        if (handledInteractions.has(interaction.id)) {
+            console.log('Skipping already handled interaction:', interaction.id);
+            return;
         }
-
-        // Get products and category from cache
-        const cached = bulkProductCache.get(interaction.message.id);
-        if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
-            return interaction.editReply('❌ Session expired. Please restart the command.');
-        }
+        handledInteractions.add(interaction.id);
         
-        const { products, mainCategory, subCategory } = cached;
-        const productsWithImages = await Promise.all(products.map(async (product) => {
-            const response = await fetch(product.image.url);
-            if (!response.ok) throw new Error('Failed to download image');
-            const buffer = await response.buffer();
-            return {
+        try {
+            // Safe defer with additional checks
+            if (!interaction.deferred && !interaction.replied) {
+                try {
+                    await interaction.deferUpdate();
+                } catch (deferError) {
+                    if (deferError.code === 10062 || deferError.code === 'InteractionAlreadyReplied') {
+                        console.log('Interaction already handled:', interaction.id);
+                        return;
+                    }
+                    throw deferError;
+                }
+            }
+
+            // Get products and category from cache
+            const cached = bulkProductCache.get(interaction.message.id);
+            if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
+                return interaction.editReply('❌ Session expired. Please restart the command.');
+            }
+            
+            const { products, mainCategory, subCategory } = cached;
+            
+            // Use the already processed image data from cache instead of re-downloading
+            const productsForFirestore = products.map(product => ({
                 name: product.name,
                 price: product.price,
                 link: product.link,
                 mainCategory,
                 subCategory,
-                image: {
-                    data: buffer.toString('base64'),
-                    contentType: response.headers.get('content-type'),
-                    name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+                image: product.image // Use the cached image data
+            }));
+            
+            const addedIds = await bulkAddProducts(productsForFirestore);
+            bulkProductCache.delete(interaction.message.id);
+            
+            await interaction.editReply({
+                content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
+                embeds: [],
+                components: []
+            });
+        } catch (error) {
+            console.error('Bulk add error:', error);
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply(`❌ Failed to add products: ${error.message}`);
+                } else {
+                    await interaction.reply({ 
+                        content: `❌ Error: ${error.message}`,
+                        ephemeral: true 
+                    });
                 }
-            };
-        }));
-        
-        const addedIds = await bulkAddProducts(productsWithImages);
-        bulkProductCache.delete(interaction.message.id);
-        
-        await interaction.editReply({
-            content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
-            embeds: [],
-            components: []
-        });
-    } catch (error) {
-        console.error('Bulk add error:', error);
-        try {
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(`❌ Failed to add products: ${error.message}`);
-            } else {
-                await interaction.reply({ 
-                    content: `❌ Error: ${error.message}`,
-                    ephemeral: true 
-                });
+            } catch (nestedError) {
+                console.error('Nested error handling:', nestedError);
             }
-        } catch (nestedError) {
-            console.error('Nested error handling:', nestedError);
         }
     }
-}
     
-if (interaction.customId === 'cancel_bulk_add') {
-    if (handledInteractions.has(interaction.id)) return;
-    handledInteractions.add(interaction.id);
-    await safeDeferUpdate(interaction);
+    if (interaction.customId === 'cancel_bulk_add') {
+        if (handledInteractions.has(interaction.id)) return;
+        handledInteractions.add(interaction.id);
+        await safeDeferUpdate(interaction);
         bulkProductCache.delete(interaction.message.id);
         await interaction.editReply({
             content: '❌ Bulk add cancelled',
@@ -836,18 +829,18 @@ if (interaction.customId === 'cancel_bulk_add') {
             components: []
         });
     }
+    
     // Example of safe defer handling
-try {
-    await interaction.deferUpdate();
-} catch (error) {
-    if (error.code === 10062) {
-        console.log('Ignoring expired interaction');
-        return;
+    try {
+        await interaction.deferUpdate();
+    } catch (error) {
+        if (error.code === 10062) {
+            console.log('Ignoring expired interaction');
+            return;
+        }
+        throw error;
     }
-    throw error;
-}
 });
-
 
     
     client.once('ready', async () => {
