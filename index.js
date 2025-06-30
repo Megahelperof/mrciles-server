@@ -750,7 +750,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
     
-client.on('interactionCreate', async interaction => {
+    client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
     if (interaction.customId === 'confirm_bulk_add') {
@@ -783,24 +783,38 @@ client.on('interactionCreate', async interaction => {
             
             const { products, mainCategory, subCategory } = cached;
             
-            // Use the already processed image data from cache instead of re-downloading
-            const productsForFirestore = products.map(product => ({
-                name: product.name,
-                price: product.price,
-                link: product.link,
-                mainCategory,
-                subCategory,
-                image: product.image // Use the cached image data
-            }));
-            
-            const addedIds = await bulkAddProducts(productsForFirestore);
-            bulkProductCache.delete(interaction.message.id);
-            
-            await interaction.editReply({
-                content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
-                embeds: [],
-                components: []
+            // Create clean product data without undefined values
+            const productsForFirestore = products.map(product => {
+                const productData = {
+                    name: product.name,
+                    price: product.price,
+                    link: product.link,
+                    mainCategory,
+                    image: product.image,
+                    created_at: admin.firestore.FieldValue.serverTimestamp()
+                };
+                
+                // Only add subCategory if it exists
+                if (subCategory) {
+                    productData.subCategory = subCategory;
+                }
+                
+                return productData;
             });
+            
+            try {
+                const addedIds = await bulkAddProducts(productsForFirestore);
+                bulkProductCache.delete(interaction.message.id);
+                
+                await interaction.editReply({
+                    content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
+                    embeds: [],
+                    components: []
+                });
+            } catch (error) {
+                console.error('Firestore error:', error);
+                throw new Error('Failed to add products in bulk');
+            }
         } catch (error) {
             console.error('Bulk add error:', error);
             try {
@@ -841,6 +855,42 @@ client.on('interactionCreate', async interaction => {
         throw error;
     }
 });
+
+// Update the bulkAddProducts function to handle undefined values
+async function bulkAddProducts(products) {
+    try {
+        const batch = db.batch();
+        const addedIds = [];
+        
+        for (const product of products) {
+            const docRef = db.collection('products').doc();
+            
+            // Create clean document data
+            const docData = {
+                name: product.name,
+                price: product.price,
+                link: product.link,
+                mainCategory: product.mainCategory,
+                image: product.image,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            };
+            
+            // Only add subCategory if it exists
+            if (product.subCategory) {
+                docData.subCategory = product.subCategory;
+            }
+            
+            batch.set(docRef, docData);
+            addedIds.push(docRef.id);
+        }
+        
+        await batch.commit();
+        return addedIds;
+    } catch (error) {
+        console.error('Firestore error:', error);
+        throw new Error('Failed to add products in bulk');
+    }
+}
 
     
     client.once('ready', async () => {
