@@ -266,11 +266,9 @@ client.on('interactionCreate', async interaction => {
             }
 case 'bulk-add': {
     const imageAttachments = [];
-    // Get each image option individually
     for (let i = 1; i <= 5; i++) {
         const attachment = options.getAttachment(`image${i}`);
         if (attachment) {
-            // Validate attachment
             if (!attachment.contentType || !attachment.contentType.startsWith('image/')) {
                 await interaction.editReply(`❌ Attachment #${i} is not a valid image`);
                 return;
@@ -287,7 +285,6 @@ case 'bulk-add': {
     const prices = options.getString('prices').split(',').map(p => p.trim());
     const links = options.getString('links').split(',').map(l => l.trim());
 
-    // Validate input lengths
     if (imageAttachments.length === 0) {
         await interaction.editReply('❌ Please attach at least one image');
         return;
@@ -303,7 +300,6 @@ case 'bulk-add': {
         return;
     }
 
-    // Create product objects with image data
     const bulkProducts = await Promise.all(names.map(async (name, i) => {
         const response = await fetch(imageAttachments[i].url);
         if (!response.ok) throw new Error(`Failed to download image #${i+1}`);
@@ -320,13 +316,6 @@ case 'bulk-add': {
         };
     }));
 
-// Preserve existing data and add the selected category
-bulkProductCache.set(interaction.message.id, {
-    ...cached, // Spread existing data
-    mainCategory: interaction.values[0], // Add selected category
-    timestamp: Date.now() // Refresh expiry
-});
-    // Create preview embeds
     const embeds = names.map((name, i) => 
         new EmbedBuilder()
             .setTitle(`Product #${i+1}`)
@@ -335,7 +324,6 @@ bulkProductCache.set(interaction.message.id, {
             .setColor('#3498db')
     );
 
-    // Create category selection menu AFTER embeds
     const mainCategoryRow = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
             .setCustomId('bulk_main_category')
@@ -348,14 +336,12 @@ bulkProductCache.set(interaction.message.id, {
             )
     );
 
-    // Now send the message with initialized variables
     const message = await interaction.editReply({
         content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
         embeds,
         components: [mainCategoryRow]
     });
 
-    // Store in cache AFTER message is created
     bulkProductCache.set(message.id, {
         products: bulkProducts,
         timestamp: Date.now()
