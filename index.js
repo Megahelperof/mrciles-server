@@ -478,38 +478,47 @@ bulkProductCache.set(interaction.message.id, {
         }
         
         // Handle bulk add confirmation
-        else if (interaction.customId === 'confirm_bulk_add') {
-            await interaction.deferUpdate();
-            try {
-                const products = interaction.bulkProducts;
-                const productsWithImages = await Promise.all(products.map(async (product) => {
-                    const response = await fetch(product.imageUrl);
-                    if (!response.ok) throw new Error('Failed to download image');
-                    const buffer = await response.buffer();
-                    return {
-                        ...product,
-                        image: {
-                            data: buffer.toString('base64'),
-                            contentType: response.headers.get('content-type'),
-                            name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-                        }
-                    };
-                }));
-                const addedIds = await bulkAddProducts(productsWithImages);
-                await interaction.editReply({
-                    content: `✅ Added ${addedIds.length} products successfully!`,
-                    embeds: [],
-                    components: []
-                });
-            } catch (error) {
-                console.error('Bulk add error:', error);
-                await interaction.editReply({
-                    content: `❌ Failed to add products: ${error.message}`,
-                    components: []
-                });
-            }
+else if (interaction.customId === 'confirm_bulk_add') {
+    await interaction.deferUpdate();
+    try {
+        // Get products and category from cache instead of interaction
+        const cached = bulkProductCache.get(interaction.message.id);
+        if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
+            return interaction.editReply('❌ Session expired. Please restart the command.');
         }
         
+        const { products, mainCategory, subCategory } = cached;
+        const productsWithImages = await Promise.all(products.map(async (product) => {
+            const response = await fetch(product.image.url);
+            if (!response.ok) throw new Error('Failed to download image');
+            const buffer = await response.buffer();
+            return {
+                name: product.name,
+                price: product.price,
+                link: product.link,
+                mainCategory,
+                subCategory,
+                image: {
+                    data: buffer.toString('base64'),
+                    contentType: response.headers.get('content-type'),
+                    name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+                }
+            };
+        }));
+        
+        const addedIds = await bulkAddProducts(productsWithImages);
+        bulkProductCache.delete(interaction.message.id);
+        
+        await interaction.editReply({
+            content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
+            embeds: [],
+            components: []
+        });
+    } catch (error) {
+        console.error('Bulk add error:', error);
+        await interaction.editReply(`❌ Failed to add products: ${error.message}`);
+    }
+}
         // Handle bulk add cancellation
         else if (interaction.customId === 'cancel_bulk_add') {
             await interaction.deferUpdate();
