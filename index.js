@@ -87,19 +87,21 @@ const bulkProductCache = new Map();
             ]
         },
 {
-    name: 'bulk-add',
-    description: 'Add multiple products (up to 5)',
-    options: [
-        { name: 'image1', description: 'Image for product 1', type: 11, required: true },
-        { name: 'image2', description: 'Image for product 2', type: 11, required: false },
-        { name: 'image3', description: 'Image for product 3', type: 11, required: false },
-        { name: 'image4', description: 'Image for product 4', type: 11, required: false },
-        { name: 'image5', description: 'Image for product 5', type: 11, required: false },
-        { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
-        { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
-        { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
-    ]
-},
+        name: 'bulk-add',
+        description: 'Add multiple products (up to 5)',
+        options: [
+            { name: 'image1', description: 'Image for product 1', type: 11, required: true },
+            // Move required text options BEFORE optional images
+            { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
+            { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
+            { name: 'links', description: 'Product links (comma separated)', type: 3, required: true },
+            // Optional images come AFTER required options
+            { name: 'image2', description: 'Image for product 2', type: 11, required: false },
+            { name: 'image3', description: 'Image for product 3', type: 11, required: false },
+            { name: 'image4', description: 'Image for product 4', type: 11, required: false },
+            { name: 'image5', description: 'Image for product 5', type: 11, required: false }
+        ]
+    },
         new SlashCommandBuilder()
             .setName('help')
             .setDescription('Show all available commands')
