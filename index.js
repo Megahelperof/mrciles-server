@@ -220,12 +220,15 @@ if (!interaction.deferred && !interaction.replied) {
     try {
         await interaction.deferReply({ flags: 64 });
     } catch (error) {
-        if (error.code === 10062) {
-            console.log('Ignoring expired interaction');
+        // Handle specific Discord API errors
+        if (error.code === 10062 || error.code === 'InteractionAlreadyReplied') {
+            console.log('Skipping already handled interaction');
             return;
         }
         throw error;
     }
+} else {
+    console.log('Skipping defer: Interaction already handled');
 }
 
     // Defer reply for admin commands
@@ -351,10 +354,11 @@ case 'bulk-add': {
             )
     );
 
-    if (!interaction.deferred || interaction.replied) {
-    console.error("Cannot edit: Interaction not deferred or already replied");
+if (!interaction.deferred || interaction.replied) {
+    console.error('Cannot edit reply - Interaction not deferred or already replied');
     return;
 }
+
 
     const message = await interaction.editReply({
         content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
@@ -658,11 +662,11 @@ if (interaction.customId === 'confirm_bulk_add') {
         try {
             await interaction.deferUpdate();
         } catch (error) {
-            if (error.code === 10062) {
-                console.log('Ignoring expired interaction');
+            if (error.code === 10062 || error.code === 'InteractionAlreadyReplied') {
+                console.log('Skipping already handled button interaction');
                 return;
             }
-            throw error; // Re-throw unexpected errors
+            throw error;
         }
     }
         try {
