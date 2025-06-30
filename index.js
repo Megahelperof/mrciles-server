@@ -86,16 +86,20 @@ const bulkProductCache = new Map();
                 { name: 'id', description: 'Product ID', type: 3, required: true }
             ]
         },
-        {
-            name: 'bulk-add',
-            description: 'Add multiple products (up to 5)',
-            options: [
-                { name: 'images', description: 'Product images (up to 5)', type: 11, required: true },
-                { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
-                { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
-                { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
-            ]
-        },
+{
+    name: 'bulk-add',
+    description: 'Add multiple products (up to 5)',
+    options: [
+        { name: 'image1', description: 'Image for product 1', type: 11, required: true },
+        { name: 'image2', description: 'Image for product 2', type: 11, required: false },
+        { name: 'image3', description: 'Image for product 3', type: 11, required: false },
+        { name: 'image4', description: 'Image for product 4', type: 11, required: false },
+        { name: 'image5', description: 'Image for product 5', type: 11, required: false },
+        { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
+        { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
+        { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
+    ]
+},
         new SlashCommandBuilder()
             .setName('help')
             .setDescription('Show all available commands')
@@ -236,18 +240,20 @@ client.on('interactionCreate', async interaction => {
                 });
                 break;
             }
-            case 'bulk-add': {
+case 'bulk-add': {
     const imageAttachments = [];
+    // Get each image option individually
     for (let i = 1; i <= 5; i++) {
-        const attachment = interaction.options.getAttachment(`image${i}`);
+        const attachment = options.getAttachment(`image${i}`);
         if (attachment) {
             imageAttachments.push(attachment);
         }
     }
 
-    const names = interaction.options.getString('names').split(',').map(n => n.trim());
-    const prices = interaction.options.getString('prices').split(',').map(p => p.trim());
-    const links = interaction.options.getString('links').split(',').map(l => l.trim());
+
+    const names = options.getString('names').split(',').map(n => n.trim());
+    const prices = options.getString('prices').split(',').map(p => p.trim());
+    const links = options.getString('links').split(',').map(l => l.trim());
 
     // Validate input lengths
     if (imageAttachments.length === 0) {
