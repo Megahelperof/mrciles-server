@@ -496,31 +496,32 @@ client.on('interactionCreate', async interaction => {
                     content: `✅ Main category **${mainCategory}** selected! Choose subcategory for ALL products:`,
                     components: [subCategoryRow]
                 });
-            } else {
-                // No subcategories - show confirmation
-                const actionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('confirm_bulk_add')
-                        .setLabel('Confirm')
-                        .setStyle(ButtonStyle.Success),
-                    new ButtonBuilder()
-                        .setCustomId('cancel_bulk_add')
-                        .setLabel('Cancel')
-                        .setStyle(ButtonStyle.Danger)
-                );
-                
-                // Store category in cache
-                bulkProductCache.set(interaction.message.id, {
-                    mainCategory,
-                    subCategory: '',
-                    products: interaction.message.interaction.bulkProducts
-                });
-                
-                await interaction.editReply({
-                    content: `✅ Main category **${mainCategory}** selected! Choose subcategory for ALL products:`,
-                    components: [subCategoryRow]
-                });
-            }
+} else {
+    // No subcategories - show confirmation
+    const actionRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('confirm_bulk_add')
+            .setLabel('Confirm')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('cancel_bulk_add')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Danger)
+    );
+    
+    // Store category in cache
+    bulkProductCache.set(interaction.message.id, {
+        mainCategory,
+        subCategory: '',
+        products: interaction.message.interaction.bulkProducts
+    });
+    
+    // CORRECTED: Use actionRow and proper message
+    await interaction.editReply({
+        content: `✅ Main category **${mainCategory}** selected! Confirm adding ${interaction.message.interaction.bulkProducts.length} products?`,
+        components: [actionRow] // Now using the properly defined actionRow
+    });
+}
         }
         
         // Handle bulk subcategory selection
