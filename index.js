@@ -371,11 +371,11 @@ client.on('interactionCreate', async interaction => {
                 );
                 
                 // Update cache with main category
-                productDataCache.set(interaction.message.id, {
-                    ...cachedData,
-                    mainCategory
-                });
-                
+bulkProductCache.set(interaction.message.id, {
+    products: bulkProducts,
+    originalInteraction: interaction,
+    timestamp: Date.now()
+});
                 await interaction.editReply({
                     content: `✅ Main category: **${mainCategory}** selected! Please choose a subcategory:`,
                     components: [subCategoryRow]
@@ -513,10 +513,11 @@ if (interaction.customId === 'bulk_main_category') {
             );
             
             // Update cache with main category
-            bulkProductCache.set(interaction.message.id, {
-                ...cached,
-                mainCategory
-            });
+bulkProductCache.set(interaction.message.id, {
+    products: bulkProducts,
+    originalInteraction: interaction,
+    timestamp: Date.now()
+});
             
             await interaction.editReply({
                 content: `✅ Main category: **${mainCategory}** selected! Please choose a subcategory:`,
@@ -535,13 +536,11 @@ if (interaction.customId === 'bulk_main_category') {
                     .setStyle(ButtonStyle.Danger)
             );
             
-            // Update cache with category info
-            bulkProductCache.set(interaction.message.id, {
-                ...cached,
-                mainCategory,
-                subCategory: ''
-            });
-            
+bulkProductCache.set(interaction.message.id, {
+    products: bulkProducts,
+    originalInteraction: interaction,
+    timestamp: Date.now()
+});
             await interaction.editReply({
                 content: `✅ Main category **${mainCategory}** selected! Confirm adding ${products.length} products?`,
                 components: [actionRow]
@@ -563,7 +562,11 @@ if (interaction.customId === 'bulk_main_category') {
             const subCategory = interaction.values[0];
             
             // Get main category from cache
-            const cached = bulkProductCache.get(interaction.message.id);
+const cached = bulkProductCache.get(interaction.message.id);
+if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) { // 5 minute expiry
+    console.error('Cache expired or missing');
+    return interaction.editReply('❌ Product data expired. Please try the command again.');
+}
             if (!cached) {
                 return interaction.editReply('❌ Session expired. Please start over.');
             }
@@ -581,10 +584,11 @@ if (interaction.customId === 'bulk_main_category') {
             );
             
             // Update cache with subcategory
-            bulkProductCache.set(interaction.message.id, {
-                ...cached,
-                subCategory
-            });
+bulkProductCache.set(interaction.message.id, {
+    products: bulkProducts,
+    originalInteraction: interaction,
+    timestamp: Date.now()
+});
             
             await interaction.editReply({
                 content: `✅ Category: **${cached.mainCategory} > ${subCategory}**\nConfirm adding ${cached.products.length} products?`,
@@ -615,10 +619,11 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferUpdate();
         try {
             // Get products and category from cache
-            const cached = bulkProductCache.get(interaction.message.id);
-            if (!cached) {
-                return interaction.editReply('❌ Session expired. Please start over.');
-            }
+    const cached = bulkProductCache.get(interaction.message.id);
+    if (!cached) {
+        console.error('Confirm bulk add - cache miss');
+        return interaction.editReply('❌ Product data expired. Please try the command again.');
+    }
             
             const { products, mainCategory, subCategory } = cached;
             const productsWithImages = await Promise.all(products.map(async (product) => {
