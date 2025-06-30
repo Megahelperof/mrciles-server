@@ -248,10 +248,18 @@ case 'bulk-add': {
     for (let i = 1; i <= 5; i++) {
         const attachment = options.getAttachment(`image${i}`);
         if (attachment) {
+            // Validate attachment
+            if (!attachment.contentType || !attachment.contentType.startsWith('image/')) {
+                await interaction.editReply(`❌ Attachment #${i} is not a valid image`);
+                return;
+            }
+            if (attachment.size > 1024 * 1024) {
+                await interaction.editReply(`❌ Image #${i} is too large (max 1MB)`);
+                return;
+            }
             imageAttachments.push(attachment);
         }
     }
-
 
     const names = options.getString('names').split(',').map(n => n.trim());
     const prices = options.getString('prices').split(',').map(p => p.trim());
@@ -273,7 +281,30 @@ case 'bulk-add': {
         return;
     }
 
-    // Create preview embeds with correct images
+    // Create product objects with image data
+    const bulkProducts = await Promise.all(names.map(async (name, i) => {
+        const response = await fetch(imageAttachments[i].url);
+        if (!response.ok) throw new Error(`Failed to download image #${i+1}`);
+        const buffer = await response.buffer();
+        return {
+            name,
+            price: prices[i],
+            link: links[i],
+            image: {
+                data: buffer.toString('base64'),
+                contentType: response.headers.get('content-type'),
+                name: `product-${Date.now()}-${i}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+            }
+        };
+    }));
+
+    // Store in cache
+    bulkProductCache.set(interaction.id, {
+        products: bulkProducts,
+        originalInteraction: interaction
+    });
+
+    // Create preview embeds
     const embeds = names.map((name, i) => 
         new EmbedBuilder()
             .setTitle(`Product #${i+1}`)
@@ -281,14 +312,6 @@ case 'bulk-add': {
             .setImage(imageAttachments[i].url)
             .setColor('#3498db')
     );
-
-    // Store products with their respective image URLs
-    interaction.bulkProducts = names.map((name, i) => ({
-        name,
-        price: prices[i],
-        link: links[i],
-        imageUrl: imageAttachments[i].url
-    }));
 
     // Create category selection menu
     const mainCategoryRow = new ActionRowBuilder().addComponents(
@@ -455,71 +478,82 @@ client.on('interactionCreate', async interaction => {
 if (interaction.customId === 'bulk_main_category') {
     try {
         await interaction.deferUpdate();
-    } catch (error) {
-        if (error.code === 10062) {
-            console.log('Ignoring unknown interaction');
-            return;
+        
+        // Get the cached data - try both interaction.id and message.id as keys
+        const cached = bulkProductCache.get(interaction.id) || 
+                      bulkProductCache.get(interaction.message?.id);
+        
+        if (!cached || !cached.products) {
+            return interaction.editReply('❌ Product data expired. Please try the command again.');
         }
-        throw error;
-    }
-    
-    const mainCategory = interaction.values[0];
-    
-    // Validate category exists
-    if (!CATEGORIES.hasOwnProperty(mainCategory)) {
-        return interaction.editReply('❌ Invalid category selected. Please try again.');
-    }
 
-    // Get subcategories safely
-    const subCategories = (CATEGORIES[mainCategory] && CATEGORIES[mainCategory].length) ? CATEGORIES[mainCategory] : [];
-    
-    // Only show subcategory menu if there are subcategories
-    if (subCategories.length > 0) {
-        const subCategoryRow = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('bulk_sub_category')
-                .setPlaceholder('Select subcategory for ALL products')
-                .addOptions(
-                    subCategories.map(subCat => ({
-                        label: subCat,
-                        value: subCat
-                    }))
-                )
-        );
+        const { products } = cached;
+        const mainCategory = interaction.values[0];
         
-        bulkProductCache.set(interaction.message.id, {
-            mainCategory,
-            products: interaction.bulkProducts
-        });
+        // Validate category exists
+        if (!CATEGORIES.hasOwnProperty(mainCategory)) {
+            return interaction.editReply('❌ Invalid category selected. Please try again.');
+        }
+
+        // Get subcategories safely
+        const subCategories = CATEGORIES[mainCategory] || [];
         
-        await interaction.editReply({
-            content: `✅ Main category **${mainCategory}** selected! Choose subcategory for ALL products:`,
-            components: [subCategoryRow]
-        });
-    } else {
-        // No subcategories - show confirmation
-        const actionRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('confirm_bulk_add')
-                .setLabel('Confirm')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId('cancel_bulk_add')
-                .setLabel('Cancel')
-                .setStyle(ButtonStyle.Danger)
-        );
-        
-        // Store category in cache
-        bulkProductCache.set(interaction.message.id, {
-            mainCategory,
-            subCategory: '',
-            products: interaction.bulkProducts
-        });
-        
-        await interaction.editReply({
-            content: `✅ Main category **${mainCategory}** selected! Confirm adding ${interaction.bulkProducts.length} products?`,
-            components: [actionRow]
-        });
+        // Only show subcategory menu if there are subcategories
+        if (subCategories.length > 0) {
+            const subCategoryRow = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('bulk_sub_category')
+                    .setPlaceholder('Select subcategory for ALL products')
+                    .addOptions(
+                        subCategories.map(subCat => ({
+                            label: subCat,
+                            value: subCat
+                        }))
+                    )
+            );
+            
+            // Update cache with main category
+            bulkProductCache.set(interaction.message.id, {
+                ...cached,
+                mainCategory
+            });
+            
+            await interaction.editReply({
+                content: `✅ Main category: **${mainCategory}** selected! Please choose a subcategory:`,
+                components: [subCategoryRow]
+            });
+        } else {
+            // No subcategories - show confirmation
+            const actionRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('confirm_bulk_add')
+                    .setLabel('Confirm')
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId('cancel_bulk_add')
+                    .setLabel('Cancel')
+                    .setStyle(ButtonStyle.Danger)
+            );
+            
+            // Update cache with category info
+            bulkProductCache.set(interaction.message.id, {
+                ...cached,
+                mainCategory,
+                subCategory: ''
+            });
+            
+            await interaction.editReply({
+                content: `✅ Main category **${mainCategory}** selected! Confirm adding ${products.length} products?`,
+                components: [actionRow]
+            });
+        }
+    } catch (error) {
+        console.error('Bulk category selection error:', error);
+        if (interaction.deferred) {
+            await interaction.editReply(`❌ Error: ${error.message}`);
+        } else {
+            await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
+        }
     }
 }
         
