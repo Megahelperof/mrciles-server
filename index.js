@@ -204,17 +204,29 @@ client.on('interactionCreate', async interaction => {
                 { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
             );
         
-        return interaction.reply({ embeds: [helpEmbed], flags: 64 });
+    return interaction.reply({ embeds: [helpEmbed], flags: 64 });
     }
     
     // Admin-only commands below
-    if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
-        return interaction.reply({ 
-            content: '⛔ You need admin privileges to use this command', 
-            flags: 64
-        });
+if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
+    return interaction.reply({ 
+        content: '⛔ You need admin privileges to use this command', 
+        flags: 64
+    });
+}
+
+if (interaction.deferred || interaction.replied) return;
+
+try {
+    await interaction.deferReply({ flags: 64 });
+} catch (error) {
+    if (error.code === 10062) {
+        console.log('Ignoring expired interaction');
+        return;
     }
-    
+    throw error;
+}
+
     // Defer reply for admin commands
     await interaction.deferReply({ flags: 64 });
     
@@ -489,6 +501,8 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
     
     try {
+        // Handle 10062 errors
+        if (interaction.deferred || interaction.replied) return;
         // Handle bulk category selection
 if (interaction.customId === 'bulk_main_category') {
     try {
