@@ -489,26 +489,15 @@ else if (interaction.customId === 'confirm_bulk_add') {
         
         const { products, mainCategory, subCategory } = cached;
         const productsWithImages = await Promise.all(products.map(async (product) => {
-            // Ensure URL has proper protocol
-            let imageUrl = product.image.url;
-            if (!imageUrl.startsWith('http')) {
-                imageUrl = `https://${imageUrl}`;
-            }
-            
-            const response = await fetch(imageUrl);
-            if (!response.ok) throw new Error('Failed to download image');
-            const buffer = await response.buffer();
+            // The image data is already in base64 format from the bulk-add command
+            // No need to fetch it again
             return {
                 name: product.name,
                 price: product.price,
                 link: product.link,
                 mainCategory,
                 subCategory,
-                image: {
-                    data: buffer.toString('base64'),
-                    contentType: response.headers.get('content-type'),
-                    name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-                }
+                image: product.image // Use the already processed image data
             };
         }));
         
