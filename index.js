@@ -230,10 +230,6 @@ if (!interaction.deferred && !interaction.replied) {
 } else {
     console.log('Skipping defer: Interaction already handled');
 }
-
-    // Defer reply for admin commands
-    await interaction.deferReply({ flags: 64 });
-    
     try {
         switch (commandName) {
             case 'add': {
@@ -658,7 +654,7 @@ client.on('interactionCreate', async interaction => {
     
 if (interaction.customId === 'confirm_bulk_add') {
     // Only defer if NOT already deferred/replied
-    if (!interaction.deferred && !interaction.replied) {
+    if (!interaction.deferred && !interaction.replied) {  // <--- ADD THIS CHECK
         try {
             await interaction.deferUpdate();
         } catch (error) {
