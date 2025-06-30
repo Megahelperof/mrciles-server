@@ -192,25 +192,40 @@ const CATEGORIES = {
         }
     }
     
-    async function bulkAddProducts(products) {
-        try {
-            const batch = db.batch();
-            const addedIds = [];
-            for (const product of products) {
-                const docRef = db.collection('products').doc();
-                batch.set(docRef, {
-                    ...product,
-                    created_at: admin.firestore.FieldValue.serverTimestamp()
-                });
-                addedIds.push(docRef.id);
+async function bulkAddProducts(products) {
+    try {
+        const batch = db.batch();
+        const addedIds = [];
+        
+        for (const product of products) {
+            const docRef = db.collection('products').doc();
+            
+            // Create clean document data
+            const docData = {
+                name: product.name,
+                price: product.price,
+                link: product.link,
+                mainCategory: product.mainCategory,
+                image: product.image,
+                created_at: admin.firestore.FieldValue.serverTimestamp()
+            };
+            
+            // Only add subCategory if it exists
+            if (product.subCategory) {
+                docData.subCategory = product.subCategory;
             }
-            await batch.commit();
-            return addedIds;
-        } catch (error) {
-            console.error('Firestore error:', error);
-            throw new Error('Failed to add products in bulk');
+            
+            batch.set(docRef, docData);
+            addedIds.push(docRef.id);
         }
+        
+        await batch.commit();
+        return addedIds;
+    } catch (error) {
+        console.error('Firestore error:', error);
+        throw new Error('Failed to add products in bulk');
     }
+}
     
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
@@ -856,43 +871,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Update the bulkAddProducts function to handle undefined values
-async function bulkAddProducts(products) {
-    try {
-        const batch = db.batch();
-        const addedIds = [];
-        
-        for (const product of products) {
-            const docRef = db.collection('products').doc();
-            
-            // Create clean document data
-            const docData = {
-                name: product.name,
-                price: product.price,
-                link: product.link,
-                mainCategory: product.mainCategory,
-                image: product.image,
-                created_at: admin.firestore.FieldValue.serverTimestamp()
-            };
-            
-            // Only add subCategory if it exists
-            if (product.subCategory) {
-                docData.subCategory = product.subCategory;
-            }
-            
-            batch.set(docRef, docData);
-            addedIds.push(docRef.id);
-        }
-        
-        await batch.commit();
-        return addedIds;
-    } catch (error) {
-        console.error('Firestore error:', error);
-        throw new Error('Failed to add products in bulk');
-    }
-}
-
-    
     client.once('ready', async () => {
         console.log(`✅ Bot logged in as ${client.user.tag}!`);
         try {
