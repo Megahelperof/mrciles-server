@@ -182,19 +182,19 @@ client.on('interactionCreate', async interaction => {
                 { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
             );
         
-        return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+        return interaction.reply({ embeds: [helpEmbed], flags: 64 });
     }
     
     // Admin-only commands below
     if (!member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
         return interaction.reply({ 
             content: '⛔ You need admin privileges to use this command', 
-            ephemeral: true 
+            flags: 64
         });
     }
     
     // Defer reply for admin commands
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     
     try {
         switch (commandName) {
@@ -442,7 +442,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.deferred) {
             await interaction.editReply(`❌ Error: ${error.message}`);
         } else {
-            await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
+            await interaction.reply({ content: `❌ Error: ${error.message}`, flags: 64 });
         }
     }
 });
@@ -453,24 +453,40 @@ client.on('interactionCreate', async interaction => {
     try {
         // Handle bulk category selection
         if (interaction.customId === 'bulk_main_category') {
-            await interaction.deferUpdate();
+            try {
+                await interaction.deferUpdate();
+            } catch (error) {
+                if (error.code === 10062) { // Handle expired interactions
+                    console.log('Ignoring unknown interaction');
+                    return;
+                }
+                throw error;
+            }
+            
             const mainCategory = interaction.values[0];
             
-            // Check if category has subcategories
-            if (CATEGORIES[mainCategory]?.length > 0) {
+            // Validate category exists
+            if (!CATEGORIES.hasOwnProperty(mainCategory)) {
+                return interaction.editReply('❌ Invalid category selected. Please try again.');
+            }
+
+            // Get subcategories safely
+            const subCategories = CATEGORIES[mainCategory] || [];
+            
+            // Only show subcategory menu if there are subcategories
+            if (subCategories.length > 0) {
                 const subCategoryRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('bulk_sub_category')
                         .setPlaceholder('Select subcategory for ALL products')
                         .addOptions(
-                            CATEGORIES[mainCategory].map(subCat => ({
+                            subCategories.map(subCat => ({
                                 label: subCat,
                                 value: subCat
                             }))
                         )
                 );
                 
-                // Store main category in cache
                 bulkProductCache.set(interaction.message.id, {
                     mainCategory,
                     products: interaction.message.interaction.bulkProducts
@@ -501,8 +517,8 @@ client.on('interactionCreate', async interaction => {
                 });
                 
                 await interaction.editReply({
-                    content: `✅ Category: **${mainCategory}**\nConfirm adding ${interaction.message.interaction.bulkProducts.length} products?`,
-                    components: [actionRow]
+                    content: `✅ Main category **${mainCategory}** selected! Choose subcategory for ALL products:`,
+                    components: [subCategoryRow]
                 });
             }
         }
@@ -541,6 +557,17 @@ client.on('interactionCreate', async interaction => {
                 components: [actionRow]
             });
         }
+
+        // Example of safe defer handling
+try {
+    await interaction.deferUpdate();
+} catch (error) {
+    if (error.code === 10062) {
+        console.log('Ignoring expired interaction');
+        return;
+    }
+    throw error;
+}
     } catch (error) {
         console.error('Bulk category error:', error);
         await interaction.editReply(`❌ Error: ${error.message}`);
@@ -601,7 +628,18 @@ client.on('interactionCreate', async interaction => {
             components: []
         });
     }
+    // Example of safe defer handling
+try {
+    await interaction.deferUpdate();
+} catch (error) {
+    if (error.code === 10062) {
+        console.log('Ignoring expired interaction');
+        return;
+    }
+    throw error;
+}
 });
+
 
     
     client.once('ready', async () => {
@@ -976,7 +1014,7 @@ client.on('interactionCreate', async interaction => {
                             { name: '/bulkremovelink [ids]', value: 'Remove multiple products by comma-separated IDs' }
                         );
                     
-                    return interaction.reply({ embeds: [helpEmbed], ephemeral: true });
+                    return interaction.reply({ embeds: [helpEmbed], flags: 64 });
                 }
                 
                 // Defer reply for all other commands
