@@ -18,6 +18,24 @@ const DEFAULT_PRICE_SELECTOR = "b[class^='productPrice_price']";
 const DEFAULT_STOCK_SELECTOR = "button[class*='productButton_soldout']";
 const DEFAULT_CHECK_TEXT = "Sold Out";
 
+// Add this near the top with other variables
+setInterval(() => {
+    const now = Date.now();
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    
+    for (const [key, value] of productDataCache.entries()) {
+        if (now - (value.timestamp || 0) > FIVE_MINUTES) {
+            productDataCache.delete(key);
+        }
+    }
+    
+    for (const [key, value] of bulkProductCache.entries()) {
+        if (now - (value.timestamp || 0) > FIVE_MINUTES) {
+            bulkProductCache.delete(key);
+        }
+    }
+}, 60000); // Clean up every minute
+
 if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     console.log('Starting Firebase bot...');
     const missingVars = [];
@@ -299,11 +317,18 @@ case 'bulk-add': {
     }));
 
     // Store in cache
-    bulkProductCache.set(interaction.id, {
-        products: bulkProducts,
-        originalInteraction: interaction
-    });
+const message = await interaction.editReply({
+    content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
+    embeds,
+    components: [mainCategoryRow]
+});
 
+// Preserve existing data and add the selected category
+bulkProductCache.set(interaction.message.id, {
+    ...cached, // Spread existing data
+    mainCategory: interaction.values[0], // Add selected category
+    timestamp: Date.now() // Refresh expiry
+});
     // Create preview embeds
     const embeds = names.map((name, i) => 
         new EmbedBuilder()
@@ -370,10 +395,9 @@ client.on('interactionCreate', async interaction => {
                         ) // Added missing parenthesis here
                 );
                 
-                // Update cache with main category
 bulkProductCache.set(interaction.message.id, {
-    products: bulkProducts,
-    originalInteraction: interaction,
+    ...cached,
+    mainCategory: mainCategory,
     timestamp: Date.now()
 });
                 await interaction.editReply({
@@ -479,14 +503,10 @@ if (interaction.customId === 'bulk_main_category') {
     try {
         await interaction.deferUpdate();
         
-        // Get the cached data - try both interaction.id and message.id as keys
-        const cached = bulkProductCache.get(interaction.id) || 
-                      bulkProductCache.get(interaction.message?.id);
-        
-        if (!cached || !cached.products) {
-            return interaction.editReply('❌ Product data expired. Please try the command again.');
-        }
-
+const cached = bulkProductCache.get(interaction.message.id);
+if (!cached || Date.now() - cached.timestamp > 300000) { // 5-minute expiry
+    return interaction.editReply('❌ Session expired. Please restart the command.');
+}
         const { products } = cached;
         const mainCategory = interaction.values[0];
         
@@ -513,10 +533,10 @@ if (interaction.customId === 'bulk_main_category') {
             );
             
             // Update cache with main category
-bulkProductCache.set(interaction.message.id, {
-    products: bulkProducts,
-    originalInteraction: interaction,
-    timestamp: Date.now()
+// Update cache with main category
+productDataCache.set(interaction.message.id, {
+    ...cachedData,
+    mainCategory: mainCategory
 });
             
             await interaction.editReply({
@@ -536,10 +556,11 @@ bulkProductCache.set(interaction.message.id, {
                     .setStyle(ButtonStyle.Danger)
             );
             
+// Preserve existing data and add the selected category
 bulkProductCache.set(interaction.message.id, {
-    products: bulkProducts,
-    originalInteraction: interaction,
-    timestamp: Date.now()
+    ...cached, // Spread existing data
+    mainCategory: interaction.values[0], // Add selected category
+    timestamp: Date.now() // Refresh expiry
 });
             await interaction.editReply({
                 content: `✅ Main category **${mainCategory}** selected! Confirm adding ${products.length} products?`,
@@ -563,9 +584,8 @@ bulkProductCache.set(interaction.message.id, {
             
             // Get main category from cache
 const cached = bulkProductCache.get(interaction.message.id);
-if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) { // 5 minute expiry
-    console.error('Cache expired or missing');
-    return interaction.editReply('❌ Product data expired. Please try the command again.');
+if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
+    return interaction.editReply('❌ Session expired. Please restart the command.');
 }
             if (!cached) {
                 return interaction.editReply('❌ Session expired. Please start over.');
@@ -584,10 +604,11 @@ if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) { // 
             );
             
             // Update cache with subcategory
+// Preserve existing data and add the selected category
 bulkProductCache.set(interaction.message.id, {
-    products: bulkProducts,
-    originalInteraction: interaction,
-    timestamp: Date.now()
+    ...cached, // Spread existing data
+    mainCategory: interaction.values[0], // Add selected category
+    timestamp: Date.now() // Refresh expiry
 });
             
             await interaction.editReply({
@@ -619,11 +640,10 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferUpdate();
         try {
             // Get products and category from cache
-    const cached = bulkProductCache.get(interaction.message.id);
-    if (!cached) {
-        console.error('Confirm bulk add - cache miss');
-        return interaction.editReply('❌ Product data expired. Please try the command again.');
-    }
+const cached = bulkProductCache.get(interaction.message.id);
+if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
+    return interaction.editReply('❌ Session expired. Please restart the command.');
+}
             
             const { products, mainCategory, subCategory } = cached;
             const productsWithImages = await Promise.all(products.map(async (product) => {
