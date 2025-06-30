@@ -320,13 +320,6 @@ case 'bulk-add': {
         };
     }));
 
-    // Store in cache
-const message = await interaction.editReply({
-    content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
-    embeds,
-    components: [mainCategoryRow]
-});
-
 // Preserve existing data and add the selected category
 bulkProductCache.set(interaction.message.id, {
     ...cached, // Spread existing data
@@ -342,7 +335,7 @@ bulkProductCache.set(interaction.message.id, {
             .setColor('#3498db')
     );
 
-    // Create category selection menu
+    // Create category selection menu AFTER embeds
     const mainCategoryRow = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
             .setCustomId('bulk_main_category')
@@ -355,13 +348,21 @@ bulkProductCache.set(interaction.message.id, {
             )
     );
 
-    await interaction.editReply({
+    // Now send the message with initialized variables
+    const message = await interaction.editReply({
         content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
         embeds,
         components: [mainCategoryRow]
     });
+
+    // Store in cache AFTER message is created
+    bulkProductCache.set(message.id, {
+        products: bulkProducts,
+        timestamp: Date.now()
+    });
     break;
-            }
+}
+
         }
     } catch (error) {
         console.error('Command error:', error);
