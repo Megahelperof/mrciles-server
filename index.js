@@ -477,7 +477,7 @@ bulkProductCache.set(interaction.message.id, {
             });
         }
         
-        // Handle bulk add confirmation
+// Find the existing code block starting around line 483:
 else if (interaction.customId === 'confirm_bulk_add') {
     await interaction.deferUpdate();
     try {
@@ -489,19 +489,65 @@ else if (interaction.customId === 'confirm_bulk_add') {
         
         const { products, mainCategory, subCategory } = cached;
         const productsWithImages = await Promise.all(products.map(async (product) => {
-            // The image data is already in base64 format from the bulk-add command
-            // No need to fetch it again
+            // Ensure URL has proper protocol
+            let imageUrl = product.image.url;
+            if (!imageUrl.startsWith('http')) {
+                imageUrl = `https://${imageUrl}`;
+            }
+            
+            const response = await fetch(imageUrl);
+            if (!response.ok) throw new Error('Failed to download image');
+            const buffer = await response.buffer();
             return {
                 name: product.name,
                 price: product.price,
                 link: product.link,
                 mainCategory,
                 subCategory,
-                image: product.image // Use the already processed image data
+                image: {
+                    data: buffer.toString('base64'),
+                    contentType: response.headers.get('content-type'),
+                    name: `product-${Date.now()}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
+                }
             };
         }));
         
         const addedIds = await bulkAddProducts(productsWithImages);
+        bulkProductCache.delete(interaction.message.id);
+        
+        await interaction.editReply({
+            content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
+            embeds: [],
+            components: []
+        });
+    } catch (error) {
+        console.error('Bulk add error:', error);
+        await interaction.editReply(`❌ Failed to add products: ${error.message}`);
+    }
+}
+
+// Replace it with this simplified version:
+else if (interaction.customId === 'confirm_bulk_add') {
+    await interaction.deferUpdate();
+    try {
+        // Get products and category from cache
+        const cached = bulkProductCache.get(interaction.message.id);
+        if (!cached || !cached.products || Date.now() - cached.timestamp > 300000) {
+            return interaction.editReply('❌ Session expired. Please restart the command.');
+        }
+        
+        const { products, mainCategory, subCategory } = cached;
+        // Use the existing image data instead of trying to refetch
+        const productsForFirestore = products.map(product => ({
+            name: product.name,
+            price: product.price,
+            link: product.link,
+            mainCategory,
+            subCategory,
+            image: product.image // Use the already processed image data
+        }));
+        
+        const addedIds = await bulkAddProducts(productsForFirestore);
         bulkProductCache.delete(interaction.message.id);
         
         await interaction.editReply({
