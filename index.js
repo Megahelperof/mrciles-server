@@ -13,13 +13,16 @@ const cheerio = require("cheerio");
 
 puppeteerExtra.use(StealthPlugin());
 
-// Default selectors and text for product monitoring
 const DEFAULT_PRICE_SELECTOR = "b[class^='productPrice_price']";
 const DEFAULT_STOCK_SELECTOR = "button[class*='productButton_soldout']";
 const DEFAULT_CHECK_TEXT = "Sold Out";
 
-// Add this near the top with other variables
-setInterval(() => {
+let productDataCache;
+let bulkProductCache;
+
+const cleanupInterval = () => {
+    if (!productDataCache || !bulkProductCache) return;
+    
     const now = Date.now();
     const FIVE_MINUTES = 5 * 60 * 1000;
     
@@ -34,7 +37,9 @@ setInterval(() => {
             bulkProductCache.delete(key);
         }
     }
-}, 60000); // Clean up every minute
+};
+
+setInterval(cleanupInterval, 60000);
 
 if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     console.log('Starting Firebase bot...');
@@ -64,7 +69,8 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
         }
     }
 
-    const productDataCache = new Map();
+productDataCache = new Map();
+bulkProductCache = new Map();
     
     const db = admin.firestore();
     const client = new Client({ 
@@ -83,8 +89,6 @@ const CATEGORIES = {
     MISC: [],
     MAIN: []
 };
-
-const bulkProductCache = new Map();
     
     const commands = [
         {
