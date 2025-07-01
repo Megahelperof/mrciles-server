@@ -623,7 +623,7 @@ client.on('interactionCreate', async interaction => {
                 console.log('Skipping already handled interaction (main category)');
                 return;
             }
-            handledInteractions.add(interaction.id);
+            handledInteractions.set(interaction.id, Date.now());
             
             try {
                 await safeDeferUpdate(interaction);
@@ -710,7 +710,7 @@ client.on('interactionCreate', async interaction => {
                 console.log('Skipping already handled subcategory selection:', interaction.id);
                 return;
             }
-            handledInteractions.add(interaction.id);
+            handledInteractions.set(interaction.id, Date.now());
             
             try {
                 await safeDeferUpdate(interaction);
@@ -847,7 +847,7 @@ client.on('interactionCreate', async interaction => {
     
     if (interaction.customId === 'cancel_bulk_add') {
         if (handledInteractions.has(interaction.id)) return;
-        handledInteractions.add(interaction.id);
+        handledInteractions.set(interaction.id, Date.now());
         await safeDeferUpdate(interaction);
         bulkProductCache.delete(interaction.message.id);
         await interaction.editReply({
