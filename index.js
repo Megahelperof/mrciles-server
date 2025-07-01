@@ -21,40 +21,38 @@ let productDataCache;
 let bulkProductCache;
 
 async function safeDeferUpdate(interaction) {
-    if (handledInteractions.has(interaction.id)) {
-        console.log('Interaction already handled - skipping defer');
-        return false;
-    }
-    
     if (interaction.deferred || interaction.replied) {
         console.log('Interaction already handled - skipping defer');
-        return false;
+        return;
     }
-    
     try {
         await interaction.deferUpdate();
-        handledInteractions.set(interaction.id, Date.now());
-        return true;
     } catch (error) {
         if (error.code === 10062 || error.code === 'InteractionAlreadyReplied') {
             console.log('Skipping already handled interaction');
-            handledInteractions.set(interaction.id, Date.now());
-            return false;
+            return;
         }
         throw error;
     }
 }
 
-const handledInteractions = new Map();
+const handledInteractions = new Set();
 
 const cleanupInterval = () => {
     if (!productDataCache || !bulkProductCache) return;
     
     const now = Date.now();
     const FIVE_MINUTES = 5 * 60 * 1000;
-    for (const [id, timestamp] of handledInteractions.entries()) {
-        if (now - timestamp > FIVE_MINUTES) {
-            handledInteractions.delete(id);
+    
+    for (const [key, value] of productDataCache.entries()) {
+        if (now - (value.timestamp || 0) > FIVE_MINUTES) {
+            productDataCache.delete(key);
+        }
+    }
+    
+    for (const [key, value] of bulkProductCache.entries()) {
+        if (now - (value.timestamp || 0) > FIVE_MINUTES) {
+            bulkProductCache.delete(key);
         }
     }
 };
@@ -493,7 +491,10 @@ bulkProductCache.set(interaction.message.id, {
                 components: []
             });
         }
-
+        
+// Remove the existing confirm_bulk_add handler (around line 483)
+// Replace it with this simplified version:
+else if (interaction.customId === 'confirm_bulk_add') {
     await interaction.deferUpdate();
     try {
         // Get products and category from cache
@@ -518,20 +519,24 @@ bulkProductCache.set(interaction.message.id, {
         
         await interaction.editReply({
             content: `✅ Added ${addedIds.length} products to **${mainCategory}${subCategory ? ` > ${subCategory}` : ''}**!`,
-             embeds: [],
+            embeds: [],
             components: []
         });
     } catch (error) {
         console.error('Bulk add error:', error);
         await interaction.editReply(`❌ Failed to add products: ${error.message}`);
     }
+}
+
+// Also remove the duplicate confirm_bulk_add handler starting around line 750
+// Replace it with this:
 if (interaction.customId === 'confirm_bulk_add') {
     // Skip if already handled
     if (handledInteractions.has(interaction.id)) {
         console.log('Skipping already handled interaction:', interaction.id);
         return;
     }
-    handledInteractions.set(interaction.id, Date.now());
+    handledInteractions.add(interaction.id);
     
     try {
         // Safe defer with additional checks
@@ -623,7 +628,7 @@ client.on('interactionCreate', async interaction => {
                 console.log('Skipping already handled interaction (main category)');
                 return;
             }
-            handledInteractions.set(interaction.id, Date.now());
+            handledInteractions.add(interaction.id);
             
             try {
                 await safeDeferUpdate(interaction);
@@ -710,7 +715,7 @@ client.on('interactionCreate', async interaction => {
                 console.log('Skipping already handled subcategory selection:', interaction.id);
                 return;
             }
-            handledInteractions.set(interaction.id, Date.now());
+            handledInteractions.add(interaction.id);
             
             try {
                 await safeDeferUpdate(interaction);
@@ -769,10 +774,7 @@ client.on('interactionCreate', async interaction => {
             console.log('Skipping already handled interaction:', interaction.id);
             return;
         }
-        handledInteractions.set(interaction.id, Date.now());
-
-        const shouldProceed = await safeDeferUpdate(interaction);
-        if (!shouldProceed) return;
+        handledInteractions.add(interaction.id);
         
         try {
             // Safe defer with additional checks
@@ -847,7 +849,7 @@ client.on('interactionCreate', async interaction => {
     
     if (interaction.customId === 'cancel_bulk_add') {
         if (handledInteractions.has(interaction.id)) return;
-        handledInteractions.set(interaction.id, Date.now());
+        handledInteractions.add(interaction.id);
         await safeDeferUpdate(interaction);
         bulkProductCache.delete(interaction.message.id);
         await interaction.editReply({
@@ -1533,14 +1535,14 @@ client.on('interactionCreate', async interaction => {
         }
     });
     
-// ADD THIS AT THE BOTTOM OF YOUR FILE
-process.on('unhandledRejection', error => {
-    if (error.code === 10062 || error.code === 40060) {
-        console.log('Suppressed DiscordAPIError:', error.message);
+    process.on('unhandledRejection', error => {
+    if (error.code === 10062) {
+        console.log('Unhandled Interaction Error (10062) - Ignoring');
     } else {
         console.error('Unhandled Rejection:', error);
     }
 });
+    
     client.login(TOKEN);
 } else {
     console.error("FATAL: BOT_TYPE environment variable not set or invalid. Must be 'FIREBASE_BOT' or 'SCRAPER_BOT'");
