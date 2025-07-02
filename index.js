@@ -146,21 +146,15 @@ const CATEGORIES = {
             ]
         },
 {
-        name: 'bulk-add',
-        description: 'Add multiple products (up to 5)',
-        options: [
-            { name: 'image1', description: 'Image for product 1', type: 11, required: true },
-            // Move required text options BEFORE optional images
-            { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
-            { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
-            { name: 'links', description: 'Product links (comma separated)', type: 3, required: true },
-            // Optional images come AFTER required options
-            { name: 'image2', description: 'Image for product 2', type: 11, required: false },
-            { name: 'image3', description: 'Image for product 3', type: 11, required: false },
-            { name: 'image4', description: 'Image for product 4', type: 11, required: false },
-            { name: 'image5', description: 'Image for product 5', type: 11, required: false }
-        ]
-    },
+            name: 'bulk-add',
+            description: 'Add multiple products (up to 10) via ZIP file',
+            options: [
+                { name: 'zipfile', description: 'ZIP file containing product images', type: 11, required: true },
+                { name: 'names', description: 'Product names (comma separated)', type: 3, required: true },
+                { name: 'prices', description: 'Product prices (comma separated)', type: 3, required: true },
+                { name: 'links', description: 'Product links (comma separated)', type: 3, required: true }
+            ]
+        },
         new SlashCommandBuilder()
             .setName('help')
             .setDescription('Show all available commands')
@@ -253,7 +247,8 @@ client.on('interactionCreate', async interaction => {
             .addFields(
                 { name: '/add', value: 'Add a new product with image, name, price and link' },
                 { name: '/remove [id]', value: 'Remove a product by ID' },
-                { name: '/bulk-add', value: 'Add multiple products at once (up to 5)' }
+                // Updated description here:
+                { name: '/bulk-add', value: 'Add multiple products at once (up to 10) via ZIP file' }
             );
         
     return interaction.reply({ embeds: [helpEmbed], flags: 64 });
