@@ -24,6 +24,8 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // Serve static files
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static('public'));
 
 // API endpoint for products
@@ -51,6 +53,59 @@ app.get('/api/products', async (req, res) => {
     res.json(products);
   } catch (err) {
     // ... error handling ...
+  }
+});
+app.post('/api/products/bulk', async (req, res) => {
+  try {
+    // Verify admin token
+    const authToken = req.headers.authorization?.split(' ')[1];
+    if (authToken !== process.env.ADMIN_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { products } = req.body;
+    
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'Invalid products data' });
+    }
+
+    const batch = db.batch();
+    const productsRef = db.collection('products');
+    const addedIds = [];
+
+    for (const product of products) {
+      const docRef = productsRef.doc();
+      
+      // Create product data
+      const productData = {
+        name: product.name,
+        price: product.price,
+        link: product.link,
+        mainCategory: product.mainCategory,
+        subCategory: product.subCategory || null,
+        image: {
+          data: product.image.data,
+          contentType: product.image.contentType,
+          name: product.image.name
+        },
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+      
+      batch.set(docRef, productData);
+      addedIds.push(docRef.id);
+    }
+
+    await batch.commit();
+    
+    res.json({
+      success: true,
+      message: `Added ${addedIds.length} products successfully`,
+      productIds: addedIds
+    });
+    
+  } catch (err) {
+    console.error('Bulk upload error:', err);
+    res.status(500).json({ error: 'Failed to bulk upload products' });
   }
 });
 // HTML route
