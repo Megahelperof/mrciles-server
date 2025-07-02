@@ -10,6 +10,7 @@ const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const AdmZip = require('adm-zip');
 
 puppeteerExtra.use(StealthPlugin());
 
@@ -33,6 +34,18 @@ async function safeDeferUpdate(interaction) {
             return;
         }
         throw error;
+    }
+}
+
+function getContentType(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    switch(ext) {
+        case 'jpg': case 'jpeg': return 'image/jpeg';
+        case 'png': return 'image/png';
+        case 'gif': return 'image/gif';
+        case 'webp': return 'image/webp';
+        case 'avif': return 'image/avif';
+        default: return 'application/octet-stream';
     }
 }
 
@@ -318,93 +331,96 @@ if (!interaction.deferred && !interaction.replied) {
 
             
 case 'bulk-add': {
-    const imageAttachments = [];
-    for (let i = 1; i <= 5; i++) {
-        const attachment = options.getAttachment(`image${i}`);
-        if (attachment) {
-            if (!attachment.contentType || !attachment.contentType.startsWith('image/')) {
-                await interaction.editReply(`❌ Attachment #${i} is not a valid image`);
-                return;
-            }
-            if (attachment.size > 1024 * 1024) {
-                await interaction.editReply(`❌ Image #${i} is too large (max 1MB)`);
-                return;
-            }
-            imageAttachments.push(attachment);
-        }
-    }
-
+    const zipAttachment = options.getAttachment('zipfile');
     const names = options.getString('names').split(',').map(n => n.trim());
     const prices = options.getString('prices').split(',').map(p => p.trim());
     const links = options.getString('links').split(',').map(l => l.trim());
 
-    if (imageAttachments.length === 0) {
-        await interaction.editReply('❌ Please attach at least one image');
-        return;
-    }
-    if (names.length !== imageAttachments.length || 
-        names.length !== prices.length || 
-        names.length !== links.length) {
-        await interaction.editReply('❌ Number of names, prices, links, and images must match');
-        return;
-    }
-    if (names.length < 1 || names.length > 5) {
-        await interaction.editReply('❌ You can only add 1-5 products at once');
+    // Validate ZIP file
+    if (!zipAttachment || zipAttachment.contentType !== 'application/zip') {
+        await interaction.editReply('❌ Please attach a valid ZIP file');
         return;
     }
 
-    const bulkProducts = await Promise.all(names.map(async (name, i) => {
-        const response = await fetch(imageAttachments[i].url);
-        if (!response.ok) throw new Error(`Failed to download image #${i+1}`);
-        const buffer = await response.buffer();
-        return {
-            name,
-            price: prices[i],
-            link: links[i],
-            image: {
-                data: buffer.toString('base64'),
-                contentType: response.headers.get('content-type'),
-                name: `product-${Date.now()}-${i}.${response.headers.get('content-type')?.split('/')[1] || 'png'}`
-            }
-        };
-    }));
+    // Validate input lengths
+    if (names.length !== prices.length || names.length !== links.length) {
+        await interaction.editReply('❌ Number of names, prices, and links must match');
+        return;
+    }
 
-    const embeds = names.map((name, i) => 
-        new EmbedBuilder()
-            .setTitle(`Product #${i+1}`)
-            .setDescription(`**${name}**\nPrice: ${prices[i]}\n[Link](${links[i]})`)
-            .setImage(imageAttachments[i].url)
-            .setColor('#3498db')
-    );
+    if (names.length < 1 || names.length > 10) {
+        await interaction.editReply('❌ You can add 1-10 products at once');
+        return;
+    }
 
-    const mainCategoryRow = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-            .setCustomId('bulk_main_category')
-            .setPlaceholder('Select main category for ALL products')
-            .addOptions(
-                Object.keys(CATEGORIES).map(cat => ({
-                    label: cat,
-                    value: cat
-                }))
-            )
-    );
+    try {
+        // Download and process ZIP
+        const response = await fetch(zipAttachment.url);
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const zip = new AdmZip(buffer);
+        const zipEntries = zip.getEntries();
+        
+        // Filter for image files
+const imageEntries = zipEntries.filter(entry => 
+    !entry.isDirectory && /\.(jpg|jpeg|png|gif|webp|avif)$/i.test(entry.entryName)
+);
 
-if (!interaction.deferred || interaction.replied) {
-    console.error('Cannot edit reply - Interaction not deferred or already replied');
-    return;
-}
+        if (imageEntries.length < names.length) {
+            await interaction.editReply(`❌ ZIP contains only ${imageEntries.length} images, but ${names.length} products specified`);
+            return;
+        }
 
+        // Process products
+        const bulkProducts = [];
+        for (let i = 0; i < names.length; i++) {
+            const imageData = imageEntries[i].getData();
+            const filename = imageEntries[i].entryName;
+            
+            bulkProducts.push({
+                name: names[i],
+                price: prices[i],
+                link: links[i],
+                image: {
+                    data: imageData.toString('base64'),
+                    contentType: getContentType(filename),
+                    name: filename
+                }
+            });
+        }
 
-    const message = await interaction.editReply({
-        content: `**Preview of ${names.length} products**\nSelect category for ALL products:`,
-        embeds,
-        components: [mainCategoryRow]
-    });
+        // Create preview text
+        const previewText = names.map((name, i) => 
+            `**${i+1}.** ${name} - ${prices[i]} - ${links[i]}`
+        ).join('\n');
 
-    bulkProductCache.set(message.id, {
-        products: bulkProducts,
-        timestamp: Date.now()
-    });
+        // Category selection
+        const mainCategoryRow = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('bulk_main_category')
+                .setPlaceholder('Select main category for ALL products')
+                .addOptions(
+                    Object.keys(CATEGORIES).map(cat => ({
+                        label: cat,
+                        value: cat
+                    }))
+                )
+        );
+
+        const message = await interaction.editReply({
+            content: `**Preview of ${names.length} products**\n${previewText}\n\nSelect category:`,
+            components: [mainCategoryRow]
+        });
+
+        bulkProductCache.set(message.id, {
+            products: bulkProducts,
+            timestamp: Date.now()
+        });
+
+    } catch (zipError) {
+        console.error('ZIP processing error:', zipError);
+        await interaction.editReply('❌ Failed to process ZIP file');
+    }
     break;
 }
 
@@ -916,48 +932,28 @@ client.on('interactionCreate', async interaction => {
         )
         .toJSON(),
     new SlashCommandBuilder()
-        .setName('bulk-add')
-        .setDescription('Add multiple products (up to 5)')
-        .addAttachmentOption(option => 
-            option.setName('image1')
-                .setDescription('Image for product 1')
-                .setRequired(true)
-        )
-        .addAttachmentOption(option => 
-            option.setName('image2')
-                .setDescription('Image for product 2')
-                .setRequired(false)
-        )
-        .addAttachmentOption(option => 
-            option.setName('image3')
-                .setDescription('Image for product 3')
-                .setRequired(false)
-        )
-        .addAttachmentOption(option => 
-            option.setName('image4')
-                .setDescription('Image for product 4')
-                .setRequired(false)
-        )
-        .addAttachmentOption(option => 
-            option.setName('image5')
-                .setDescription('Image for product 5')
-                .setRequired(false)
-        )
-        .addStringOption(option =>
-            option.setName('names')
-                .setDescription('Product names (comma separated)')
-                .setRequired(true)
-        )
-        .addStringOption(option =>
-            option.setName('prices')
-                .setDescription('Product prices (comma separated)')
-                .setRequired(true)
-        )
-        .addStringOption(option =>
-            option.setName('links')
-                .setDescription('Product links (comma separated)')
-                .setRequired(true)
-        )
+            .setName('bulk-add')
+            .setDescription('Add multiple products (up to 10) via ZIP file')
+            .addAttachmentOption(option => 
+                option.setName('zipfile')
+                    .setDescription('ZIP file containing product images')
+                    .setRequired(true)
+            )
+            .addStringOption(option =>
+                option.setName('names')
+                    .setDescription('Product names (comma separated)')
+                    .setRequired(true)
+            )
+            .addStringOption(option =>
+                option.setName('prices')
+                    .setDescription('Product prices (comma separated)')
+                    .setRequired(true)
+            )
+            .addStringOption(option =>
+                option.setName('links')
+                    .setDescription('Product links (comma separated)')
+                    .setRequired(true)
+            )
         .toJSON(),
     new SlashCommandBuilder()
         .setName('help')
