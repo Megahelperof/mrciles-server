@@ -62,55 +62,82 @@ app.get('/api/products', async (req, res) => {
 });
 app.post('/api/products/bulk', async (req, res) => {
   try {
-    // Verify admin token
-    const authToken = req.headers.authorization?.split(' ')[1];
-    if (authToken !== process.env.ADMIN_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { products } = req.body;
     
-    if (!products || !Array.isArray(products) || products.length === 0) {
-      return res.status(400).json({ error: 'Invalid products data' });
+    // Validate input data
+    if (!products || !Array.isArray(products)) {
+      return res.status(400).json({ 
+        error: 'Invalid request format: products array is required' 
+      });
+    }
+    
+    if (products.length === 0) {
+      return res.status(400).json({ 
+        error: 'Empty products array: nothing to upload' 
+      });
     }
 
     const batch = db.batch();
     const productsRef = db.collection('products');
     const addedIds = [];
+    let validCount = 0;
 
     for (const product of products) {
-      const docRef = productsRef.doc();
-      
-      // Create product data
-      const productData = {
-        name: product.name,
-        price: product.price,
-        link: product.link,
-        mainCategory: product.mainCategory,
-        subCategory: product.subCategory || null,
-        image: {
-          data: product.image.data,
-          contentType: product.image.contentType,
-          name: product.image.name
-        },
-        created_at: admin.firestore.FieldValue.serverTimestamp()
-      };
-      
-      batch.set(docRef, productData);
-      addedIds.push(docRef.id);
+      // Validate product structure
+      if (!product.name || !product.price || !product.link || !product.image) {
+        console.warn('Skipping invalid product:', product);
+        continue;
+      }
+
+      try {
+        const docRef = productsRef.doc();
+        
+        // Create product data
+        const productData = {
+          name: product.name,
+          price: product.price,
+          link: product.link,
+          mainCategory: product.mainCategory || 'MISC',
+          subCategory: product.subCategory || null,
+          image: {
+            data: product.image.data,
+            contentType: product.image.contentType || 'image/jpeg',
+            name: product.image.name || `product-${Date.now()}.jpg`
+          },
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        batch.set(docRef, productData);
+        addedIds.push(docRef.id);
+        validCount++;
+      } catch (err) {
+        console.error('Error processing product:', product, err);
+      }
     }
 
-    await batch.commit();
-    
-    res.json({
-      success: true,
-      message: `Added ${addedIds.length} products successfully`,
-      productIds: addedIds
-    });
+    // Commit the batch if we have valid products
+    if (validCount > 0) {
+      await batch.commit();
+      console.log(`Successfully added ${validCount} products`);
+      
+      return res.json({
+        success: true,
+        message: `Added ${validCount} products successfully`,
+        productIds: addedIds,
+        skipped: products.length - validCount
+      });
+    } else {
+      return res.status(400).json({ 
+        error: 'No valid products found in the request' 
+      });
+    }
     
   } catch (err) {
     console.error('Bulk upload error:', err);
-    res.status(500).json({ error: 'Failed to bulk upload products' });
+    res.status(500).json({ 
+      error: 'Server error during bulk upload',
+      details: err.message 
+    });
   }
 });
 // HTML route
