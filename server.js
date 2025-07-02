@@ -2,6 +2,11 @@ const express = require('express');
 const admin = require('firebase-admin');
 const app = express();
 const port = process.env.PORT || 3000;
+const cors = require('cors');
+app.use(cors({
+  origin: 'https://mrciles-server-1.onrender.com',
+  methods: ['GET', 'POST']
+}));
 
 // Initialize Firebase with Render-friendly config
 if (!admin.apps.length) {
