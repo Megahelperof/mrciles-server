@@ -16,6 +16,7 @@ const cheerio = require("cheerio");
 const AdmZip = require('adm-zip');
 
 puppeteerExtra.use(StealthPlugin());
+const app = express();
 
 
 const DEFAULT_PRICE_SELECTOR = "b[class^='productPrice_price']";
