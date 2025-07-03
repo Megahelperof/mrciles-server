@@ -92,10 +92,13 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     const serverApp = express();
     const serverPort = process.env.PORT || 3000;
     
-    serverApp.use(cors({
-        origin: process.env.CORS_ORIGIN || 'https://mrciles-server-1.onrender.com',
-        methods: ['GET', 'POST']
-    }));
+// Update your CORS configuration
+serverApp.use(cors({
+    origin: process.env.CORS_ORIGIN || 'https://mrciles-server-1.onrender.com',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true  // Add this line
+}));
     
     serverApp.use(bodyParser.json({ limit: '10mb' }));
     serverApp.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
@@ -236,6 +239,8 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
 
 productDataCache = new Map();
 bulkProductCache = new Map();
+// Handle preflight requests
+serverApp.options('*', cors());
     
     const db = admin.firestore();
     const client = new Client({ 
