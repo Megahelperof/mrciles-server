@@ -207,7 +207,7 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
             });
         }
     });
-    
+
     const missingVars = [];
     if (!process.env.DISCORD_BOT_TOKEN) missingVars.push('DISCORD_BOT_TOKEN');
     if (!process.env.FIREBASE_SERVICE_ACCOUNT) missingVars.push('FIREBASE_SERVICE_ACCOUNT');
@@ -243,6 +243,11 @@ bulkProductCache = new Map();
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages
         ] 
+    });
+
+    // Add this server startup code
+    serverApp.listen(serverPort, () => {
+    console.log(`Server running on port ${serverPort}`);
     });
 
 const CATEGORIES = {
@@ -775,6 +780,7 @@ client.on('interactionCreate', async interaction => {
             console.error('❌ Command registration failed:', error);
         }
     });
+
     
     client.login(process.env.DISCORD_BOT_TOKEN)
         .catch(error => {
