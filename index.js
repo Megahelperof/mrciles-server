@@ -93,13 +93,35 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     const serverApp = express();
     const serverPort = process.env.PORT || 3000;
     
+const allowedOrigins = [
+  'https://http://127.0.0.1:5000/'
+];
 // Update your CORS configuration
-serverApp.use(cors({
-    origin: process.env.CORS_ORIGIN || 'https://mrciles-server-1.onrender.com',
-    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],  // Add all needed methods
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    credentials: true
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = `CORS policy: ${origin} not allowed`;
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  optionsSuccessStatus: 200 // Some clients prefer 200 over 204
 }));
+
+// Add this after CORS middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Expose-Headers', 'Content-Length, X-JSON');
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'DENY');
+  res.header('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
 app.all('/{*any}', (req, res, next) => {})
     
