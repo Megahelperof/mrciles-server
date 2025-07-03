@@ -10,6 +10,7 @@
     "@sparticuz/chromium": "^137.0.1",
     "@sparticuz/chromium-min": "^137.0.1",
     "adm-zip": "^0.5.16",
+    "app": "^0.1.0",
     "axios": "^1.10.0",
     "body-parser": "^2.2.0",
     "cheerio": "^1.1.0",
