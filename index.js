@@ -95,10 +95,12 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
 // Update your CORS configuration
 serverApp.use(cors({
     origin: process.env.CORS_ORIGIN || 'https://mrciles-server-1.onrender.com',
-    methods: ['GET', 'POST', 'OPTIONS'],  // Ensure OPTIONS is included
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],  // Add all needed methods
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true
 }));
+
+app.all('/{*any}', (req, res, next) => {})
     
     serverApp.use(bodyParser.json({ limit: '10mb' }));
     serverApp.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
