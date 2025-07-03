@@ -95,9 +95,9 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
 // Update your CORS configuration
 serverApp.use(cors({
     origin: process.env.CORS_ORIGIN || 'https://mrciles-server-1.onrender.com',
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'OPTIONS'],  // Ensure OPTIONS is included
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true  // Add this line
+    credentials: true
 }));
     
     serverApp.use(bodyParser.json({ limit: '10mb' }));
@@ -240,7 +240,7 @@ serverApp.use(cors({
 productDataCache = new Map();
 bulkProductCache = new Map();
 // Handle preflight requests
-serverApp.options('*', cors());
+
     
     const db = admin.firestore();
     const client = new Client({ 
