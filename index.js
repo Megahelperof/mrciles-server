@@ -94,11 +94,11 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     const serverPort = process.env.PORT || 3000;
     
 const allowedOrigins = [
-  'https://http://127.0.0.1:5000/'
+  'https://http://127.0.0.1:5000'
 ];
 // Update your CORS configuration
 app.use(cors({
-  origin: "https://lcccdb-891ca.web.app", // Your actual frontend URL
+  origin: "http://127.0.0.1:5000", // Your actual frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
@@ -106,7 +106,7 @@ app.use(cors({
 }));
 
 serverApp.use(cors({
-  origin: "https://lcccdb-891ca.web.app",
+  origin: "http://127.0.0.1:5000",
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
