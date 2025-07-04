@@ -98,12 +98,20 @@ const allowedOrigins = [
 ];
 // Update your CORS configuration
 app.use(cors({
-  origin: "http://127.0.0.1:5000", // Your actual frontend URL
+  origin: "http://127.0.0.1:5000", // Your frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  exposedHeaders: ['Content-Length', 'X-JSON'] // Expose custom headers
 }));
+
+app.use((req, res, next) => {
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('X-Frame-Options', 'DENY');
+  res.header('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
 serverApp.use(cors({
   origin: "http://127.0.0.1:5000",
@@ -113,13 +121,16 @@ serverApp.use(cors({
 }));
 serverApp.options('*', cors());
 
-app.use((req, res, next) => {
-  res.header('Access-Control-Expose-Headers', 'Content-Length, X-JSON');
-  res.header('X-Content-Type-Options', 'nosniff');
-  res.header('X-Frame-Options', 'DENY');
-  res.header('X-XSS-Protection', '1; mode=block');
+app.all('/{*any}', (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+    return res.status(200).end();
+  }
   next();
 });
+
 
     
     serverApp.use(bodyParser.json({ limit: '10mb' }));
@@ -233,7 +244,7 @@ app.use((req, res, next) => {
         }
     });
 
-    app.options('*', cors()); // Handle preflight for ALL routes
+
 
     const missingVars = [];
     if (!process.env.DISCORD_BOT_TOKEN) missingVars.push('DISCORD_BOT_TOKEN');
