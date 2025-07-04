@@ -98,23 +98,21 @@ const allowedOrigins = [
 ];
 // Update your CORS configuration
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = `CORS policy: ${origin} not allowed`;
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
+  origin: "https://lcccdb-891ca.web.app", // Your actual frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
-  optionsSuccessStatus: 200 // Some clients prefer 200 over 204
+  optionsSuccessStatus: 200
 }));
 
-// Add this after CORS middleware
+serverApp.use(cors({
+  origin: "https://lcccdb-891ca.web.app",
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+serverApp.options('*', cors());
+
 app.use((req, res, next) => {
   res.header('Access-Control-Expose-Headers', 'Content-Length, X-JSON');
   res.header('X-Content-Type-Options', 'nosniff');
@@ -123,7 +121,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.all('/{*any}', (req, res, next) => {})
     
     serverApp.use(bodyParser.json({ limit: '10mb' }));
     serverApp.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
@@ -235,6 +232,8 @@ app.all('/{*any}', (req, res, next) => {})
             });
         }
     });
+
+    app.options('*', cors()); // Handle preflight for ALL routes
 
     const missingVars = [];
     if (!process.env.DISCORD_BOT_TOKEN) missingVars.push('DISCORD_BOT_TOKEN');
