@@ -1,7 +1,6 @@
 require('dotenv').config();
 
 const express = require('express');
-const bodyParser = require('body-parser');
 const cors = require('cors');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
@@ -93,17 +92,14 @@ if (process.env.BOT_TYPE === "FIREBASE_BOT") {
     const serverApp = express();
     const serverPort = process.env.PORT || 3000;
     
-const allowedOrigins = [
-  'https://http://127.0.0.1:5000'
-];
 // Update your CORS configuration
 app.use(cors({
-  origin: "http://127.0.0.1:5000", // Your frontend URL
+  origin: "http://127.0.0.1:5000",
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
   optionsSuccessStatus: 200,
-  exposedHeaders: ['Content-Length', 'X-JSON'] // Expose custom headers
+  exposedHeaders: ['Content-Length', 'X-JSON']
 }));
 
 app.use((req, res, next) => {
@@ -113,29 +109,8 @@ app.use((req, res, next) => {
   next();
 });
 
-serverApp.use(cors({
-  origin: "http://127.0.0.1:5000",
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-serverApp.options('*', cors());
-
-app.all('/{*any}', (req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
-    return res.status(200).end();
-  }
-  next();
-});
-
-
-    
-    serverApp.use(bodyParser.json({ limit: '10mb' }));
-    serverApp.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-    serverApp.use(express.static('public'));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     
     // API endpoint for products
     serverApp.get('/api/products', async (req, res) => {
