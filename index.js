@@ -1,7 +1,5 @@
 require('dotenv').config();
 
-const express = require('express');
-const cors = require('cors');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const admin = require('firebase-admin');
@@ -15,8 +13,6 @@ const cheerio = require("cheerio");
 const AdmZip = require('adm-zip');
 
 puppeteerExtra.use(StealthPlugin());
-const app = express();
-
 
 const DEFAULT_PRICE_SELECTOR = "b[class^='productPrice_price']";
 const DEFAULT_STOCK_SELECTOR = "button[class*='productButton_soldout']";
@@ -83,144 +79,7 @@ setInterval(() => {
 }, 60000);
 
 if (process.env.BOT_TYPE === "FIREBASE_BOT") {
-    console.log('Starting Firebase bot and server...');
-
-
-        // ====================
-    // Express Server Setup
-    // ====================
-    const serverApp = express();
-    const serverPort = process.env.PORT || 3000;
-    
-// Update your CORS configuration
-app.use(cors({
-  origin: "http://127.0.0.1:5000",
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,
-  optionsSuccessStatus: 200,
-  exposedHeaders: ['Content-Length', 'X-JSON']
-}));
-
-app.use((req, res, next) => {
-  res.header('X-Content-Type-Options', 'nosniff');
-  res.header('X-Frame-Options', 'DENY');
-  res.header('X-XSS-Protection', '1; mode=block');
-  next();
-});
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-    
-    // API endpoint for products
-    serverApp.get('/api/products', async (req, res) => {
-        try {
-            const productsRef = db.collection('products');
-            const snapshot = await productsRef.orderBy('created_at', 'desc').get();
-            
-            const products = [];
-            snapshot.forEach(doc => {
-                const data = doc.data();
-                
-                // Convert base64 images to data URLs
-                if (data.image && data.image.data) {
-                    data.imageSrc = `data:${data.image.contentType};base64,${data.image.data}`;
-                }
-                
-                products.push({ 
-                    id: doc.id, 
-                    ...data,
-                    created_at: data.created_at?.toDate?.()?.toISOString?.() 
-                });
-            });
-            
-            res.json(products);
-        } catch (err) {
-            console.error('Error fetching products:', err);
-            res.status(500).json({ error: 'Failed to fetch products' });
-        }
-    });
-    
-    // Bulk upload endpoint
-    serverApp.post('/api/products/bulk', async (req, res) => {
-        try {
-            const { products } = req.body;
-            
-            if (!products || !Array.isArray(products)) {
-                return res.status(400).json({ 
-                    error: 'Invalid request format: products array is required' 
-                });
-            }
-            
-            if (products.length === 0) {
-                return res.status(400).json({ 
-                    error: 'Empty products array: nothing to upload' 
-                });
-            }
-
-            const batch = db.batch();
-            const productsRef = db.collection('products');
-            const addedIds = [];
-            let validCount = 0;
-
-            for (const product of products) {
-                if (!product.name || !product.price || !product.link || !product.image) {
-                    console.warn('Skipping invalid product:', product);
-                    continue;
-                }
-
-                try {
-                    const docRef = productsRef.doc();
-                    
-                    const productData = {
-                        name: product.name,
-                        price: product.price,
-                        link: product.link,
-                        mainCategory: product.mainCategory || 'MISC',
-                        subCategory: product.subCategory || null,
-                        image: {
-                            data: product.image.data,
-                            contentType: product.image.contentType || 'image/jpeg',
-                            name: product.image.name || `product-${Date.now()}.jpg`
-                        },
-                        created_at: admin.firestore.FieldValue.serverTimestamp()
-                    };
-                    
-                    batch.set(docRef, productData);
-                    addedIds.push(docRef.id);
-                    validCount++;
-                } catch (err) {
-                    console.error('Error processing product:', product, err);
-                }
-            }
-
-            if (validCount > 0) {
-                await batch.commit();
-                console.log(`Successfully added ${validCount} products`);
-                
-                return res.json({
-                    success: true,
-                    message: `Added ${validCount} products successfully`,
-                    productIds: addedIds,
-                    skipped: products.length - validCount
-                });
-            } else {
-                return res.status(400).json({ 
-                    error: 'No valid products found in the request' 
-                });
-            }
-            
-        } catch (err) {
-            console.error('Bulk upload error:', err);
-            res.status(500).json({ 
-                error: 'Server error during bulk upload',
-                details: err.message 
-            });
-        }
-    });
-
-
-
+    console.log('Starting Firebase bot...');
     const missingVars = [];
     if (!process.env.DISCORD_BOT_TOKEN) missingVars.push('DISCORD_BOT_TOKEN');
     if (!process.env.FIREBASE_SERVICE_ACCOUNT) missingVars.push('FIREBASE_SERVICE_ACCOUNT');
@@ -249,8 +108,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 productDataCache = new Map();
 bulkProductCache = new Map();
-// Handle preflight requests
-
     
     const db = admin.firestore();
     const client = new Client({ 
@@ -258,11 +115,6 @@ bulkProductCache = new Map();
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages
         ] 
-    });
-
-    // Add this server startup code
-    serverApp.listen(serverPort, () => {
-    console.log(`Server running on port ${serverPort}`);
     });
 
 const CATEGORIES = {
@@ -795,7 +647,6 @@ client.on('interactionCreate', async interaction => {
             console.error('❌ Command registration failed:', error);
         }
     });
-
     
     client.login(process.env.DISCORD_BOT_TOKEN)
         .catch(error => {
